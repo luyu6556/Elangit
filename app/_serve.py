@@ -16,6 +16,14 @@
 
 发布要求（平台侧）：监听环境变量 PORT、绑定 0.0.0.0。本地开发默认
 127.0.0.1:8791，不占公网。
+
+⚠ 一次一定要知道的发布约束（2026-09-20 实测）：云服务对请求来源做
+**Origin 精确匹配**。同一份文件、同一个进程，用 127.0.0.1 打开能读到库，
+换成本机局域网地址（http://192.168.1.104:8796）就整页卡在「加载中…」，
+最终报 `TypeError: Failed to fetch`，且**浏览器控制台一条错都不报**。
+→ 所以发布必须是**复用应用 ID**（`wbapp_az0Z1pxT1CjCvbUNffduqc`，
+保留域名 elangit.app.workbuddy.host），换新应用会拿到不匹配的域名、
+应用直接读不到数据。见 AGENTS.md 事实第 2 条。
 """
 import functools
 import http.server
@@ -48,11 +56,21 @@ class AppHandler(http.server.SimpleHTTPRequestHandler):
             sys.stderr.write("%s - %s\n" % (self.address_string(), fmt % args))
 
 
+class ThreadingServer(socketserver.ThreadingTCPServer):
+    """发布环境必须多线程。
+
+    默认的 TCPServer 一次只处理一个连接。本地开发看不出来（只有你一个人在刷页），
+    但发布后前面有个反向代理：代理的健康检查、浏览器的并发资源请求会互相排队，
+    表现成「偶发卡住几秒」——很难归因。daemon_threads 让进程能正常退出。
+    """
+    allow_reuse_address = True
+    daemon_threads = True
+
+
 def main():
     root = os.path.dirname(os.path.abspath(__file__))
     os.chdir(root)
     handler = functools.partial(AppHandler, directory=root)
-    socketserver.TCPServer.allow_reuse_address = True
 
     port_env = os.environ.get("PORT")
     if port_env:                      # 发布环境：监听平台给的端口与网卡
@@ -60,8 +78,8 @@ def main():
     else:                             # 本地开发
         host, port = "127.0.0.1", int(sys.argv[1]) if len(sys.argv) > 1 else 8791
 
-    with socketserver.TCPServer((host, port), handler) as httpd:
-        print("serving %s at http://%s:%d/ (no-store, share-path rewrite)"
+    with ThreadingServer((host, port), handler) as httpd:
+        print("serving %s at http://%s:%d/ (threaded, no-store, share-path rewrite)"
               % (root, host, port), flush=True)
         httpd.serve_forever()
 
