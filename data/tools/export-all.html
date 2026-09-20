@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>Elangit · 全库导出（一次性）</title>
+<style>
+  body{font-family:-apple-system,"PingFang SC",sans-serif;margin:0;padding:24px;background:#f6f6f4;color:#1a1a1a;font-size:14px;line-height:1.6}
+  h1{font-size:18px;margin:0 0 4px}
+  .sub{color:#777;margin-bottom:16px}
+  button{font:inherit;padding:8px 14px;border:1px solid #ccc;background:#fff;border-radius:6px;cursor:pointer}
+  pre{white-space:pre-wrap;word-break:break-word;background:#fff;border:1px solid #e8e8e4;border-radius:6px;padding:12px;margin:12px 0 0;font-size:12px;max-height:460px;overflow:auto;font-family:ui-monospace,Menlo,monospace}
+  .ok{color:#0a7b3e}.err{color:#b3261e}
+</style>
+</head>
+<body>
+<h1>Elangit · 全库导出（一次性）</h1>
+<div class="sub">把 7 张表全部读出来，POST 给本机接收端落盘。数据不经过模型上下文。</div>
+<button id="go">开始导出</button>
+<pre id="out">待运行</pre>
+
+<script src="https://cdn.jsdelivr.net/npm/@tencent-ai/workbuddy-cloud-sdk@dev/lib/index.global.js"></script>
+<script>
+const publicConfig = {
+  endpoint: "https://elangit.app.workbuddy.host",
+  publishableKey: "wbpk_<你的 publishableKey>"
+};
+const cloud = WorkBuddyCloud.createWorkBuddyCloud(publicConfig);
+const $ = (id) => document.getElementById(id);
+const TABLES = ["categories", "tags", "tag_groups", "settings", "items", "item_images", "events"];
+
+function log(m, cls) {
+  $("out").innerHTML += (cls ? `<span class="${cls}">${m}</span>` : m) + "\n";
+}
+function fmtErr(e) {
+  if (!e) return "unknown";
+  return [e.message, e.details, e.hint, e.code && "code=" + e.code, e.status && "status=" + e.status]
+    .filter(Boolean).join(" | ") || String(e);
+}
+
+window.__dumpResult = null;
+
+$("go").onclick = async () => {
+  $("out").textContent = "";
+  const dump = { exported_at: new Date().toISOString(), endpoint: publicConfig.endpoint, tables: {} };
+  try {
+    for (const t of TABLES) {
+      const r = await cloud.database.from(t).select("*");
+      if (r.error) { log(t + " 读取失败：" + fmtErr(r.error), "err"); throw new Error(t); }
+      dump.tables[t] = r.data || [];
+      log(t + " → " + dump.tables[t].length + " 行", "ok");
+    }
+  } catch (e) {
+    log("中断：" + fmtErr(e), "err");
+    return;
+  }
+
+  const body = JSON.stringify(dump);
+  log("序列化完成：" + (body.length / 1024).toFixed(1) + " KB");
+
+  try {
+    const res = await fetch("http://127.0.0.1:8792/dump?name=elangit-dump.json", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: body
+    });
+    const out = await res.json();
+    log("落盘成功：" + JSON.stringify(out), "ok");
+    window.__dumpResult = out;
+  } catch (e) {
+    log("POST 失败：" + String(e), "err");
+    // 兜底：留在页面上，必要时人工取
+    window.__dumpResult = { ok: false, bodyLength: body.length };
+  }
+};
+</script>
+</body>
+</html>

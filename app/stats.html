@@ -1,0 +1,485 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Elangit · 数据</title>
+<!-- 这一页是给所有者自己看的：埋点数字与验收进度。不进搜索引擎，也不给访客入口。 -->
+<meta name="robots" content="noindex,nofollow">
+<link rel="stylesheet" href="style.css">
+<style>
+  /* 数据页专属样式；布局、顶栏、面板都跟主站共用 style.css */
+  .wrap{max-width:940px;margin:0 auto;padding:26px 22px 80px}
+  .wrap > h1{font-size:20px;font-weight:500;margin-bottom:6px}
+  .wrap > .sub{font-size:13px;color:var(--ink-3);margin-bottom:26px;line-height:1.7}
+
+  .rep{margin-bottom:18px}
+  .rep > h2{font-size:15px;font-weight:500;margin-bottom:4px;display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+  .rep > h2 .tag{font-size:11.5px;font-weight:400;color:var(--ink-3)}
+  .rep > .why{font-size:12.5px;color:var(--ink-3);line-height:1.7;margin-bottom:14px}
+
+  .kpis{display:flex;gap:22px;flex-wrap:wrap}
+  .kpi b{display:block;font-size:24px;font-weight:500;line-height:1.2}
+  .kpi span{font-size:12.5px;color:var(--ink-3)}
+  .kpi.pass b{color:#2E7D4F}
+  .kpi.warn b{color:#B4632A}
+  .kpi.empty b{color:var(--ink-3);font-size:17px;padding-top:6px}
+
+  /* 每日录入条数：纯 CSS 柱状，不引图表库 —— 一个自用报表不值得多一个依赖 */
+  .bars{display:flex;align-items:flex-end;gap:5px;height:110px;padding-top:8px}
+  .bcol{flex:1;min-width:0;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;gap:4px;height:100%}
+  .bcol .bar{width:100%;max-width:26px;background:#D8D4CD;border-radius:4px 4px 0 0;min-height:2px}
+  .bcol.has .bar{background:#1C1B19}
+  .bcol .n{font-size:10.5px;color:var(--ink-3);line-height:1}
+  .axis{display:flex;gap:5px;margin-top:6px}
+  .axis span{flex:1;text-align:center;font-size:10.5px;color:var(--ink-3);min-width:0;overflow:hidden;white-space:nowrap}
+
+  .rtab{width:100%;border-collapse:collapse;font-size:13px}
+  .rtab th{text-align:left;font-weight:500;color:var(--ink-2);font-size:12.5px;padding:7px 10px;border-bottom:1px solid var(--line)}
+  .rtab td{padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:top;line-height:1.55}
+  .rtab tr:last-child td{border-bottom:0}
+  .rtab .num{font-variant-numeric:tabular-nums;white-space:nowrap}
+  .rtab .ok{color:#2E7D4F}
+  .rtab .no{color:#B4632A}
+  .rtab .na{color:var(--ink-3)}
+
+  .track{height:6px;border-radius:3px;background:#EFEDE9;overflow:hidden;margin-top:6px}
+  .track i{display:block;height:100%;background:#1C1B19}
+
+  .need{max-width:560px;margin:70px auto;padding:0 22px;text-align:center;color:var(--ink-3);line-height:1.8}
+</style>
+</head>
+<body>
+
+<header>
+  <span class="logo"><i></i>Elangit</span>
+  <nav class="hnav">
+    <a href="index.html">灵感库</a>
+    <a href="add.html" class="owner-only">收进灵感</a>
+    <a href="stats.html" class="owner-only on">数据</a>
+  </nav>
+  <div class="spacer"></div>
+  <span class="muted" id="hdrNote">加载中…</span>
+  <span id="ownerBar"></span>
+</header>
+
+<main class="wrap" id="needOwner" style="display:none">
+  <div class="need">
+    <b>这一页只有所有者能看。</b><br>
+    点右上角「解锁编辑」输入口令。
+  </div>
+</main>
+
+<main class="wrap" id="report" style="display:none">
+  <h1>数据</h1>
+  <div class="sub">
+    只为回答一件事：<b>PRD 1.2 的核心假设成不成立</b>。<br>
+    下面的数字都从库里现算，不是写死的历史值 —— 所以样本少的时候它们会很难看，这是对的。
+  </div>
+
+  <div class="panel rep">
+    <h2>验收进度 <span class="tag">PRD 第 10 章</span></h2>
+    <div class="why">只列需要真实数据才能判定的那几条。其余（分享、权限、AI 失败不丢素材）在构建记录里逐条实测过。</div>
+    <div id="accept"></div>
+  </div>
+
+  <div class="panel rep">
+    <h2>每日录入条数 <span class="tag">近 14 天 · A12</span></h2>
+    <div class="why">看的是<b>有没有掉零</b>，不是看总量。连续两周不断，这条验收才算过；中间断一天就得重新数。</div>
+    <div id="daily"></div>
+  </div>
+
+  <div class="panel rep">
+    <h2>AI 字段修改率 <span class="tag">A2：标签可用率 ≥ 70%</span></h2>
+    <div class="why" id="diffWhy">按字段算「用户改过的条数 / 有 AI 原值的条数」。改得越少说明 AI 判得越准。</div>
+    <div id="diff"></div>
+  </div>
+
+  <div class="panel rep">
+    <h2>找回效率 <span class="tag">A4：10 次检索里 ≥ 8 次能在 10 秒内找到</span></h2>
+    <div class="why">从「执行搜索/筛选」到「点开某一条」的间隔。只算点进详情的那种点击 —— 「看原始截图」是扫一眼就走，不代表找到了。</div>
+    <div id="search"></div>
+  </div>
+
+  <div class="panel rep">
+    <h2>兜底抽屉占比 <span class="tag">A11 / A13：抽屉该不该改</span></h2>
+    <div class="why">落进兜底抽屉的比例超过 10%，说明抽屉划分有问题，该回头调（PRD A13 的复盘信号）。</div>
+    <div id="fallback"></div>
+  </div>
+
+  <div class="panel rep">
+    <h2>封面人工兜底 <span class="tag">E13：封面裁得准不准</span></h2>
+    <div class="why">「AI 判过矩形、用户又换了一次」说明裁得不准；「AI 从没判过就换图」说明这条没走过 AI 裁切。两者要修的东西不同。</div>
+    <div id="cover"></div>
+  </div>
+</main>
+
+<div id="toast"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@tencent-ai/workbuddy-cloud-sdk@dev/lib/index.global.js"></script>
+<script src="config.js"></script>
+<script src="auth.js"></script>
+<script src="cards.js"></script>
+<script src="store.js"></script>
+<!-- diff.js 与详情页共用同一套「AI 原值 → 现值」比较规则。
+     两处各写一份的话，详情页说改了 3 处、这里说 2 处，就不可能有结论了。 -->
+<script src="diff.js"></script>
+<script src="track.js"></script>
+<script src="ownerbar.js"></script>
+<script>
+(function () {
+  'use strict';
+  var S = window.Elangit.store, C = window.Elangit.cards, T = window.Elangit.track, D = window.Elangit.diff;
+  var $ = function (id) { return document.getElementById(id); };
+  var esc = C.esc;
+
+  var DAYS = 14;                       // 每日录入图看两周
+  var EV_SINCE_DAYS = 60;              // 事件只往回读 60 天，够算所有指标
+
+  /* ---------- 小工具 ---------- */
+
+  function dayKey(d) {
+    // 本地日期（不是 UTC）：用户看的是自己的日历，「今天」必须和他的一致，
+    // 否则晚上 8 点之后录的会被算到明天。
+    var x = new Date(d);
+    return x.getFullYear() + '-'
+      + ('0' + (x.getMonth() + 1)).slice(-2) + '-'
+      + ('0' + x.getDate()).slice(-2);
+  }
+  function lastDays(n) {
+    var out = [], t = new Date();
+    for (var i = n - 1; i >= 0; i--) {
+      var d = new Date(t.getFullYear(), t.getMonth(), t.getDate() - i);
+      out.push(dayKey(d));
+    }
+    return out;
+  }
+  function shortDay(k) {
+    var p = k.split('-');
+    return Number(p[1]) + '/' + Number(p[2]);
+  }
+  function mean(a) {
+    return a.length ? a.reduce(function (x, y) { return x + y; }, 0) / a.length : null;
+  }
+  function median(a) {
+    if (!a.length) return null;
+    var s = a.slice().sort(function (x, y) { return x - y; });
+    var m = Math.floor(s.length / 2);
+    return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
+  }
+  function sec(ms) { return ms == null ? '—' : (ms / 1000).toFixed(1) + 's'; }
+  function pct(x) { return x == null ? '—' : (x * 100).toFixed(0) + '%'; }
+  function na(text) { return '<span class="na">' + text + '</span>'; }
+
+  /* ---------- 数据 ---------- */
+
+  var state = { items: [], events: [], tax: null };
+
+  function boot() {
+    if (!window.Elangit.auth.isOwner()) {
+      $('needOwner').style.display = 'block';
+      $('hdrNote').textContent = '只读浏览';
+      return;
+    }
+    T.session();
+    var since = new Date(Date.now() - EV_SINCE_DAYS * 864e5).toISOString();
+
+    Promise.all([
+      S.reportItems(),
+      S.loadEvents(null, since),
+      S.loadTaxonomy()
+    ]).then(function (r) {
+      state.items = r[0];
+      state.events = r[1];
+      state.tax = r[2];
+      $('hdrNote').textContent = state.items.length + ' 条素材 · ' + state.events.length + ' 条事件';
+      $('report').style.display = 'block';
+      renderDaily();
+      renderDiff();
+      renderSearch();
+      renderFallback();
+      renderCover();
+      renderAccept();
+    }).catch(function (e) {
+      $('needOwner').style.display = 'block';
+      $('needOwner').innerHTML = '<div class="need"><b>读不到数据</b><br>' + esc(S.describe(e)) + '</div>';
+    });
+  }
+
+  /* ---------- 1. 每日录入条数 ---------- */
+
+  function renderDaily() {
+    var days = lastDays(DAYS);
+    var count = {};
+    days.forEach(function (d) { count[d] = 0; });
+    state.items.forEach(function (it) {
+      var k = dayKey(it.created_at);
+      if (count[k] !== undefined) count[k]++;
+    });
+
+    var vals = days.map(function (d) { return count[d]; });
+    var max = Math.max.apply(null, vals.concat([1]));
+    var sum = vals.reduce(function (a, b) { return a + b; }, 0);
+
+    // 连续天数从今天往回数：今天没录就断在今天（不算「还在连续」）
+    var streak = 0;
+    for (var i = days.length - 1; i >= 0; i--) {
+      if (vals[i] > 0) streak++; else break;
+    }
+
+    var bars = days.map(function (d, i) {
+      var h = Math.round(vals[i] / max * 100);
+      return '<div class="bcol' + (vals[i] ? ' has' : '') + '" title="' + d + '：' + vals[i] + ' 条">'
+        + '<span class="n">' + (vals[i] || '') + '</span>'
+        + '<span class="bar" style="height:' + (vals[i] ? Math.max(h, 6) : 2) + '%"></span>'
+        + '</div>';
+    }).join('');
+    var axis = days.map(function (d, i) {
+      // 14 天全标会挤成一团，隔一天标一个
+      return '<span>' + (i % 2 === 0 || i === days.length - 1 ? shortDay(d) : '') + '</span>';
+    }).join('');
+
+    $('daily').innerHTML =
+      '<div class="kpis" style="margin-bottom:16px">'
+      + '<div class="kpi"><b>' + sum + '</b><span>近 ' + DAYS + ' 天录入</span></div>'
+      + '<div class="kpi' + (streak >= 14 ? ' pass' : '') + '"><b>' + streak + '</b><span>连续录入天数（目标 14）</span></div>'
+      + '<div class="kpi"><b>' + state.items.length + '</b><span>库内总数</span></div>'
+      + '</div>'
+      + '<div class="bars">' + bars + '</div><div class="axis">' + axis + '</div>';
+  }
+
+  /* ---------- 2. AI 字段修改率（A2） ---------- */
+
+  function renderDiff() {
+    var s = D.summary(state.items);
+
+    if (!s.withRaw) {
+      $('diff').innerHTML = '<div class="kpis"><div class="kpi empty"><b>还没有样本</b>'
+        + '<span>库内 ' + s.total + ' 条素材，其中 ' + s.withoutRaw + ' 条早于「记录 AI 原值」上线，没有可比的原值。'
+        + '新收一条就有数据了。</span></div></div>';
+      return;
+    }
+
+    var order = ['category', 'platform', 'tags', 'title', 'summary', 'caption', 'ocr_text'];
+    var rows = order.filter(function (k) { return s.byField[k]; }).map(function (k) {
+      var f = s.byField[k];
+      var rate = f.changed / f.total;
+      var keep = 1 - rate;                       // 「没被改」= 可直接用的比例
+      return '<tr><td>' + esc(f.label) + '</td>'
+        + '<td class="num">' + f.changed + ' / ' + f.total + '</td>'
+        + '<td class="num ' + (keep >= 0.7 ? 'ok' : 'no') + '">' + pct(keep) + '</td>'
+        + '<td style="width:34%"><div class="track"><i style="width:' + Math.round(keep * 100) + '%"></i></div></td></tr>';
+    }).join('');
+
+    var tags = s.byField.tags;
+    var tagsKeep = tags ? 1 - tags.changed / tags.total : null;
+
+    $('diff').innerHTML =
+      '<div class="kpis" style="margin-bottom:16px">'
+      + '<div class="kpi ' + (tagsKeep == null ? 'empty' : (tagsKeep >= 0.7 ? 'pass' : 'warn')) + '">'
+      + '<b>' + (tagsKeep == null ? '没有数据' : pct(tagsKeep)) + '</b>'
+      + '<span>AI 标签可用率（目标 ≥ 70%）</span></div>'
+      + '<div class="kpi"><b>' + s.withRaw + '</b><span>有 AI 原值的样本</span></div>'
+      + '<div class="kpi"><b>' + s.anyChanged + ' / ' + s.withRaw + '</b><span>至少改过一处的条数</span></div>'
+      + '</div>'
+      + '<table class="rtab"><thead><tr><th>字段</th><th>改过</th><th>没被改（可用率）</th><th>　</th></tr></thead>'
+      + '<tbody>' + rows + '</tbody></table>'
+      + (s.withoutRaw
+          ? '<div class="why" style="margin:14px 0 0">还有 ' + s.withoutRaw + ' 条没有 AI 原值（早于该功能上线），'
+            + '<b>不计入上面任何一行</b> —— 把它们算进来的话，分母是假的，百分比也就没有意义。</div>'
+          : '')
+      + (s.withRaw < 10
+          ? '<div class="why" style="margin:10px 0 0"><b>样本只有 ' + s.withRaw + ' 条，这些百分比还不构成结论。</b>'
+            + 'A2 说的是「前 50 条」，现在只当趋势看。</div>'
+          : '');
+  }
+
+  /* ---------- 3. 找回效率（A4） ---------- */
+
+  function renderSearch() {
+    var ev = state.events;
+    var clicks = ev.filter(function (e) { return e.name === 'search_result_click'; });
+    var searches = ev.filter(function (e) { return e.name === 'search_execute'; });
+    var zeros = ev.filter(function (e) { return e.name === 'search_zero_result'; });
+
+    var ms = clicks.map(function (e) { return Number(e.props && e.props.ms) || 0; }).filter(function (x) { return x > 0; });
+    var within = ms.filter(function (x) { return x <= 10000; }).length;
+    var rate = ms.length ? within / ms.length : null;
+
+    if (!searches.length) {
+      $('search').innerHTML = '<div class="kpis"><div class="kpi empty"><b>还没有搜索记录</b>'
+        + '<span>在灵感库里搜索或点一下抽屉/标签，这里就开始计了。</span></div></div>';
+      return;
+    }
+
+    $('search').innerHTML =
+      '<div class="kpis" style="margin-bottom:16px">'
+      + '<div class="kpi ' + (rate == null ? 'empty' : (rate >= 0.8 ? 'pass' : 'warn')) + '">'
+      + '<b>' + (rate == null ? '没有配对' : pct(rate)) + '</b>'
+      + '<span>10 秒内点开的比例（目标 ≥ 80%）</span></div>'
+      + '<div class="kpi"><b>' + (ms.length ? sec(median(ms)) : '—') + '</b><span>中位耗时</span></div>'
+      + '<div class="kpi"><b>' + (ms.length ? sec(mean(ms)) : '—') + '</b><span>平均耗时</span></div>'
+      + '</div>'
+      + '<table class="rtab"><tbody>'
+      + '<tr><td>执行搜索 / 筛选</td><td class="num">' + searches.length + ' 次</td>'
+      + '<td>' + na('其中 ' + zeros.length + ' 次没有结果') + '</td></tr>'
+      + '<tr><td>点开结果</td><td class="num">' + clicks.length + ' 次</td>'
+      + '<td>' + na('配对上的 ' + ms.length + ' 次') + '</td></tr>'
+      + '</tbody></table>'
+      + (ms.length < 10
+          ? '<div class="why" style="margin:10px 0 0"><b>配对只有 ' + ms.length + ' 次。</b>A4 说的是「10 次检索」，'
+            + '样本不足时这个比例波动会很大。</div>'
+          : '');
+  }
+
+  /* ---------- 4. 兜底抽屉占比（A11 / A13） ---------- */
+
+  function renderFallback() {
+    var fb = (state.tax.categories || []).filter(function (c) { return c.is_fallback; })[0];
+    if (!fb || !state.items.length) {
+      $('fallback').innerHTML = '<div class="kpis"><div class="kpi empty"><b>还没有素材</b>'
+        + '<span>收进几条之后这里会显示兜底抽屉的占比。</span></div></div>';
+      return;
+    }
+    var n = state.items.filter(function (it) { return it.category === fb.name; }).length;
+    var rate = n / state.items.length;
+
+    // 按抽屉列一遍，顺便看分布 —— 只有兜底占比的话，看不出该往哪儿挪
+    var byCat = {};
+    state.items.forEach(function (it) {
+      var k = it.category || '（未归类）';
+      byCat[k] = (byCat[k] || 0) + 1;
+    });
+    var rows = Object.keys(byCat).sort(function (a, b) { return byCat[b] - byCat[a]; }).map(function (k) {
+      return '<tr><td>' + esc(k) + (k === fb.name ? ' <span class="na">（兜底）</span>' : '') + '</td>'
+        + '<td class="num">' + byCat[k] + '</td>'
+        + '<td class="num">' + pct(byCat[k] / state.items.length) + '</td></tr>';
+    }).join('');
+
+    $('fallback').innerHTML =
+      '<div class="kpis" style="margin-bottom:16px">'
+      + '<div class="kpi ' + (rate > 0.1 ? 'warn' : 'pass') + '"><b>' + pct(rate) + '</b>'
+      + '<span>落在「' + esc(fb.name) + '」的比例（超过 10% 就该调抽屉）</span></div>'
+      + '<div class="kpi"><b>' + n + ' / ' + state.items.length + '</b><span>条数</span></div>'
+      + '</div><table class="rtab"><tbody>' + rows + '</tbody></table>'
+      + (state.items.length < 30
+          ? '<div class="why" style="margin:10px 0 0"><b>库内只有 ' + state.items.length + ' 条。</b>'
+            + 'A13 要求「前 30 条完成后做一次抽屉复盘」，现在还没到复盘的时候。</div>'
+          : '');
+  }
+
+  /* ---------- 5. 封面人工兜底（E13） ---------- */
+
+  function renderCover() {
+    var ev = state.events.filter(function (e) { return e.name === 'cover_replaced'; });
+    if (!ev.length) {
+      $('cover').innerHTML = '<div class="kpis"><div class="kpi empty"><b>还没有人工换过封面</b>'
+        + '<span>这条是好事：说明 AI 给的裁切没让人不满意。有需要时在这里点一次就会被记下。</span></div></div>';
+      return;
+    }
+    var byReason = {};
+    ev.forEach(function (e) {
+      var r = (e.props && e.props.reason) || 'unknown';
+      byReason[r] = (byReason[r] || 0) + 1;
+    });
+    var label = { switch: '换一张图当封面', recrop: '重裁同一个封面', uncrop: '改回不裁', unknown: '（未标注）' };
+    var looks = { switch: '换了图，可能因为原来那张不适合当封面', recrop: '同一张裁得不满意，重裁过', uncrop: 'AI 裁过头了，退回整图' };
+    var rows = Object.keys(byReason).map(function (k) {
+      return '<tr><td>' + esc(label[k] || k) + '</td><td class="num">' + byReason[k] + '</td>'
+        + '<td>' + na(looks[k] || '') + '</td></tr>';
+    }).join('');
+
+    var recrop = ev.filter(function (e) { return (e.props && e.props.reason) === 'recrop'; }).length;
+    $('cover').innerHTML =
+      '<div class="kpis" style="margin-bottom:16px">'
+      + '<div class="kpi ' + (recrop ? 'warn' : 'pass') + '"><b>' + ev.length + '</b>'
+      + '<span>人工动过封面的次数</span></div>'
+      + '<div class="kpi"><b>' + recrop + '</b><span>其中「重裁同一张」——直指裁得准不准</span></div>'
+      + '</div><table class="rtab"><tbody>' + rows + '</tbody></table>';
+  }
+
+  /* ---------- 6. 验收进度 ---------- */
+
+  function renderAccept() {
+    var items = state.items;
+    var ev = state.events;
+
+    // A1：录入耗时，取前 20 条
+    var fin = ev.filter(function (e) { return e.name === 'item_create_finish'; })
+      .map(function (e) { return Number(e.props && e.props.ms) || 0; })
+      .filter(function (x) { return x > 0; })
+      .slice(0, 20);
+    var a1 = fin.length ? mean(fin) : null;
+
+    // A2：标签可用率
+    var ds = D.summary(items);
+    var tg = ds.byField.tags;
+    var a2 = tg && tg.total ? 1 - tg.changed / tg.total : null;
+
+    // A4：10 秒内找到
+    var clicks = ev.filter(function (e) { return e.name === 'search_result_click'; })
+      .map(function (e) { return Number(e.props && e.props.ms) || 0; })
+      .filter(function (x) { return x > 0; });
+    var a4 = clicks.length ? clicks.filter(function (x) { return x <= 10000; }).length / clicks.length : null;
+
+    // A12：连续录入天数
+    var days = lastDays(DAYS);
+    var cnt = {};
+    days.forEach(function (d) { cnt[d] = 0; });
+    items.forEach(function (it) { var k = dayKey(it.created_at); if (cnt[k] !== undefined) cnt[k]++; });
+    var streak = 0;
+    for (var i = days.length - 1; i >= 0; i--) { if (cnt[days[i]] > 0) streak++; else break; }
+
+    function verdict(ok, sample, need) {
+      if (sample < need) return '<span class="na">样本不足（' + sample + ' / ' + need + '）</span>';
+      return ok ? '<span class="ok">达标</span>' : '<span class="no">未达标</span>';
+    }
+
+    var rows = [
+      {
+        k: 'A1', what: '单条录入平均 ≤ 30 秒',
+        now: a1 == null ? na('还没有记录') : esc(sec(a1)) + '（' + fin.length + ' 条）',
+        v: verdict(a1 != null && a1 <= 30000, fin.length, 20)
+      },
+      {
+        k: 'A2', what: 'AI 标签可用率 ≥ 70%',
+        now: a2 == null ? na('还没有样本') : esc(pct(a2)) + '（' + tg.total + ' 条）',
+        v: verdict(a2 != null && a2 >= 0.7, tg ? tg.total : 0, 50)
+      },
+      {
+        k: 'A4', what: '10 次检索里 ≥ 8 次在 10 秒内找到',
+        now: a4 == null ? na('还没有配对') : esc(pct(a4)) + '（' + clicks.length + ' 次）',
+        v: verdict(a4 != null && a4 >= 0.8, clicks.length, 10)
+      },
+      {
+        k: 'A12', what: '连续 2 周保持录入',
+        now: esc(streak + ' 天'),
+        v: verdict(streak >= 14, streak, 14)
+      },
+      {
+        k: 'A13', what: '前 30 条完成一次抽屉与标签复盘',
+        now: esc(items.length + ' 条'),
+        v: verdict(false, items.length, 30)
+      }
+    ];
+
+    $('accept').innerHTML = '<table class="rtab"><thead><tr><th>#</th><th>验收项</th><th>当前</th><th>判定</th></tr></thead>'
+      + '<tbody>' + rows.map(function (r) {
+          return '<tr><td class="num">' + r.k + '</td><td>' + r.what + '</td>'
+            + '<td class="num">' + r.now + '</td><td>' + r.v + '</td></tr>';
+        }).join('') + '</tbody></table>'
+      + '<div class="why" style="margin:14px 0 0">'
+      + '「样本不足」是刻意的门槛：分母太小的时候百分比没有意义，'
+      + '与其显示一个会误导人的数字，不如明说还差多少条。'
+      + '</div>';
+  }
+
+  /* ---------- 启动 ---------- */
+
+  window.Elangit.onOwnerChange = function () { boot(); };
+  window.Elangit.ownerBar.mount();
+  boot();
+})();
+</script>
+</body>
+</html>

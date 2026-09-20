@@ -1,0 +1,838 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Elangit · 收进灵感</title>
+<link rel="stylesheet" href="style.css">
+<style>
+  /* 录入页专属样式；共用部分在 style.css */
+  .drop{
+    border:1.5px dashed var(--line-2);border-radius:var(--r);padding:26px;text-align:center;
+    color:var(--ink-3);font-size:13px;cursor:pointer;transition:border-color .15s,background .15s;
+  }
+  .drop:hover,.drop.hot{border-color:var(--ink-3);background:#FBFAF8}
+  .drop b{display:block;color:var(--ink);font-weight:500;font-size:14px;margin-bottom:4px}
+
+  .picks{display:flex;flex-wrap:wrap;gap:10px;margin-top:12px}
+  .pick{position:relative;width:96px}
+  .pick img{width:96px;height:96px;object-fit:cover;border:1px solid var(--line);border-radius:8px;display:block;background:#fff;cursor:pointer}
+  .pick.is-cover img{outline:2px solid var(--ink);outline-offset:-1px}
+  .pick .x{position:absolute;top:-6px;right:-6px;width:20px;height:20px;border-radius:50%;background:var(--ink);color:#fff;font-size:13px;line-height:18px;text-align:center}
+  .pick .badge{position:absolute;left:4px;bottom:4px;font-size:11px;line-height:1;background:var(--ink);color:#fff;border-radius:4px;padding:3px 5px}
+  .pick .use{position:absolute;right:4px;bottom:4px;font-size:11px;line-height:1;background:rgba(255,255,255,.94);border:1px solid var(--line-2);border-radius:4px;padding:3px 5px}
+
+  .item{border:1px solid var(--line);border-radius:var(--r);padding:12px;margin-bottom:12px;display:flex;gap:14px}
+  .item .pic{width:132px;flex:none}
+  .item .pic img{width:132px;height:100px;object-fit:cover;border-radius:8px;border:1px solid var(--line);background:#fff;display:block;cursor:zoom-in}
+  .item .pic .sub{font-size:11px;color:var(--ink-3);margin-top:5px;line-height:1.45;word-break:break-all}
+  .item .body{flex:1;min-width:0}
+  .item .top{display:flex;align-items:center;gap:8px;margin-bottom:6px;flex-wrap:wrap}
+  .item .top .owner-only{display:inline-flex;gap:8px}
+  .sum{font-size:14px;line-height:1.55;margin-bottom:8px}
+  .sum.empty{color:var(--ink-3)}
+  .chip.aig{border-style:dashed;border-color:#BA7517;color:var(--warn);background:var(--warnb)}
+  .chip x{cursor:pointer;opacity:.6;font-style:normal;margin-left:2px}
+  .edit{margin-top:10px;border-top:1px dashed var(--line);padding-top:10px}
+  .edit .fl{margin-top:12px}
+  .edit .fl:first-child{margin-top:0}
+  .tagadd{width:104px;border:1px dashed var(--line-2);border-radius:20px;padding:5px 9px;font-size:12px;outline:none}
+
+  @media (max-width:640px){
+    .item{flex-direction:column}
+    .item .pic{width:100%}
+    .item .pic img{width:100%;height:160px}
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <a class="logo" href="index.html"><i></i>Elangit</a>
+  <nav class="hnav">
+    <a href="index.html">灵感库</a>
+    <a href="add.html" class="on owner-only">收进灵感</a>
+  </nav>
+  <div class="spacer"></div>
+  <span class="muted">本地先出图入库，AI 结果随后补上</span>
+  <span id="ownerBar"></span>
+</header>
+
+<main class="narrow">
+  <div class="errcard" id="needOwner" style="display:none"></div>
+  <section class="panel owner-only" id="formPanel">
+    <h2>收进灵感 <span class="muted">本地先出图入库，AI 结果随后补上</span></h2>
+    <div class="drop" id="drop">
+      <b>粘贴截图，或点这里上传</b>
+      支持多张。第一张默认当代表图，点缩略图下方可以换
+    </div>
+    <input type="file" id="file" accept="image/*" multiple hidden>
+    <div class="picks" id="picks"></div>
+
+    <label class="fl" for="fText">粘贴文本（可选）</label>
+    <textarea class="inp" id="fText" placeholder="把看到的文字贴进来，比如小红书的标题和正文"></textarea>
+
+    <div class="row2">
+      <div>
+        <label class="fl" for="fUrl">网址（可选）</label>
+        <input class="inp" id="fUrl" placeholder="原文链接">
+      </div>
+      <div>
+        <label class="fl" for="fPlat">来源平台（可选，交给 AI 猜）</label>
+        <select class="inp" id="fPlat">
+          <option value="">让 AI 判断</option>
+          <option>小红书</option><option>公众号</option><option>网页</option><option>其他</option>
+        </select>
+      </div>
+    </div>
+
+    <label class="fl" for="fNote">我为什么存它（可选，但最有价值的一项）</label>
+    <input class="inp" id="fNote" placeholder="打算用在哪、想拿走什么，一句话就够">
+
+    <div class="foot">
+      <span class="hint">只有「至少一项原始内容」是必填。抽屉与标签可以直接用 AI 的。</span>
+      <button class="btn" id="btnSubmit">收进灵感库</button>
+    </div>
+    <div class="warnline" id="formErr" style="display:none"></div>
+  </section>
+
+  <section class="panel">
+    <h2>刚刚收进来的 <span class="muted">（最近 8 条，直接从数据库读回）</span></h2>
+    <div class="errcard" id="listErr" style="display:none"></div>
+    <div id="list"><div class="muted">加载中…</div></div>
+  </section>
+</main>
+
+<div class="mask" id="shotModal">
+  <div class="shot">
+    <div class="bar">
+      <h3>原始截图（1600px 原件，永不裁剪）</h3>
+      <button class="btn ghost sm" data-close>关闭</button>
+    </div>
+    <div class="box" id="shotBox"></div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@tencent-ai/workbuddy-cloud-sdk@dev/lib/index.global.js"></script>
+<script src="config.js"></script>
+<script src="auth.js"></script>
+<script src="pipeline.js"></script>
+<script src="store.js"></script>
+<script src="ai.js"></script>
+<script src="track.js"></script>
+<script src="ownerbar.js"></script>
+<script>
+(function () {
+  'use strict';
+  var IMG = window.Elangit.imaging, AI = window.Elangit.ai, S = window.Elangit.store, cfg = window.Elangit.config;
+  var T = window.Elangit.track;
+  var $ = function (id) { return document.getElementById(id); };
+
+  // E1 的起点，也是 E5「总耗时」的起点（A1 判据：从打开录入页到入库 ≤ 30 秒）。
+  // 用模块初始化时刻而不是 setTimeout(0) 之后——那点差在 30 秒的量级上无所谓，
+  // 但「打开录入页」这个语义就该是脚本开始跑的那一刻。
+  var pageOpenedAt = Date.now();
+
+  var state = {
+    taxonomy: null,
+    picked: [],        // [{raw, previewUrl}] 已经在选入时就跑完本地归一
+    coverIndex: 0,
+    items: [],         // 界面模型
+    raws: {},          // itemId -> 原件对象（内存里留着，AI 回来要重裁封面）
+    running: null,     // 正在跑 AI 的那一条
+    ticker: null
+  };
+
+  /* ---------- 小工具 ---------- */
+
+  var toastTimer = null;
+  function toast(msg) {
+    var t = $('toast');
+    t.textContent = msg;
+    t.classList.add('on');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () { t.classList.remove('on'); }, 2600);
+  }
+
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+      return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c];
+    });
+  }
+
+  function kb(n) { return (n / 1024).toFixed(0) + 'KB'; }
+
+  function fmtErr(e) { return S.describe(e); }
+
+  function clearForm() {
+    state.picked.forEach(function (p) { if (p.previewUrl) URL.revokeObjectURL(p.previewUrl); });
+    state.picked = [];
+    state.coverIndex = 0;
+    $('fText').value = ''; $('fUrl').value = ''; $('fNote').value = ''; $('fPlat').value = '';
+    renderPicks();
+  }
+
+  function showFormErr(msg) {
+    var el = $('formErr');
+    if (!msg) { el.style.display = 'none'; el.textContent = ''; return; }
+    el.style.display = 'block';
+    el.textContent = msg;
+  }
+
+  /* ---------- 图片选入（本地先跑管线，不碰网络） ---------- */
+
+  function addFiles(files) {
+    var list = Array.prototype.slice.call(files).filter(function (f) {
+      return f && f.type && f.type.indexOf('image/') === 0;
+    });
+    if (!list.length) { toast('没看到图片，剪贴板里可能只有文字'); return; }
+    var tasks = list.map(function (f) {
+      return IMG.processRaw(f).then(function (raw) {
+        return { raw: raw, previewUrl: URL.createObjectURL(f), name: f.name || '粘贴的截图' };
+      }).catch(function (e) {
+        toast('有一张图处理失败：' + fmtErr(e));
+        return null;
+      });
+    });
+    return Promise.all(tasks).then(function (rs) {
+      rs.filter(Boolean).forEach(function (r) { state.picked.push(r); });
+      renderPicks();
+      if (state.picked.length) toast('已接收 ' + state.picked.length + ' 张（本地已转好 1600px 原件）');
+    });
+  }
+
+  function renderPicks() {
+    var box = $('picks');
+    box.innerHTML = state.picked.map(function (p, i) {
+      return '<div class="pick ' + (i === state.coverIndex ? 'is-cover' : '') + '" data-i="' + i + '">'
+        + '<img src="' + p.previewUrl + '" data-act="cover" title="点图设为代表图">'
+        + '<button class="x" data-act="rm" title="移除">×</button>'
+        + (i === state.coverIndex ? '<span class="badge">代表图 / 封面来源</span>' : '<span class="use">设为封面</span>')
+        + '</div>';
+    }).join('');
+  }
+
+  $('picks').addEventListener('click', function (e) {
+    var t = e.target.closest('.pick');
+    if (!t) return;
+    var i = Number(t.getAttribute('data-i'));
+    var act = e.target.getAttribute('data-act');
+    if (act === 'rm') {
+      var p = state.picked.splice(i, 1)[0];
+      if (p && p.previewUrl) URL.revokeObjectURL(p.previewUrl);
+      if (state.coverIndex >= state.picked.length) state.coverIndex = 0;
+      renderPicks();
+    } else {
+      state.coverIndex = i;
+      renderPicks();
+    }
+  });
+
+  /* ---------- 输入入口：粘贴 / 拖拽 / 点选 ---------- */
+
+  document.addEventListener('paste', function (ev) {
+    var got = IMG.fromPasteEvent(ev);
+    if (got.files.length) {
+      ev.preventDefault();
+      addFiles(got.files);
+    } else if (got.text && !$('fText').value) {
+      $('fText').value = got.text;
+      toast('已接收粘贴的文本');
+    }
+  });
+
+  $('drop').addEventListener('click', function () { $('file').click(); });
+  $('file').addEventListener('change', function (e) { addFiles(e.target.files); e.target.value = ''; });
+
+  ['dragenter', 'dragover'].forEach(function (t) {
+    $('drop').addEventListener(t, function (e) { e.preventDefault(); $('drop').classList.add('hot'); });
+  });
+  ['dragleave', 'drop'].forEach(function (t) {
+    $('drop').addEventListener(t, function (e) { e.preventDefault(); $('drop').classList.remove('hot'); });
+  });
+  $('drop').addEventListener('drop', function (e) {
+    if (e.dataTransfer && e.dataTransfer.files) addFiles(e.dataTransfer.files);
+  });
+
+  /* ---------- 提交：本地入库 → 再排队跑 AI ---------- */
+
+  // AI 串行队列。实测单次调用 3.2–57.8s，慢在首字延迟；串行能保证
+  // 不会多条互相拖累，代价是后到的要排队——所以必须把「排队第几位」显示出来，
+  // 否则用户分不清「在排队」和「卡住了」。
+  var aiQueue = [], aiBusy = false;
+
+  function enqueueAi(itemId) {
+    aiQueue.push(itemId);
+    renderList();
+    if (!aiBusy) drainAi();
+  }
+
+  function drainAi() {
+    aiBusy = true;
+    var id = aiQueue.shift();
+    if (id === undefined) { aiBusy = false; state.running = null; renderList(); return; }
+    state.running = id;
+    var it = findItem(id);
+    if (it) it._startedAt = Date.now();
+    renderList();
+    runAi(id).catch(function () { /* runAi 内部已经把失败落到素材上了 */ })
+      .then(function () { aiBusy = false; state.running = null; drainAi(); });
+  }
+
+  var submitting = false;
+
+  $('btnSubmit').addEventListener('click', function () {
+    if (submitting) return;
+    var text = $('fText').value.trim();
+    var url = $('fUrl').value.trim();
+    var note = $('fNote').value.trim();
+    var plat = $('fPlat').value;
+
+    if (!state.picked.length && !text && !url) {
+      showFormErr('还差一样：至少要有图片、文本或网址中的一项。其余都可以留空。');
+      return;
+    }
+    showFormErr('');
+    submitting = true;
+    $('btnSubmit').disabled = true;
+    $('btnSubmit').textContent = '正在入库…';
+
+    // E2：点击提交。记下「这次是哪些输入方式」——单图 / 单文本 / 混合的耗时
+    // 不一样，不分开看的话 A1 那个 30 秒均值会混进两种完全不同的情况。
+    T.event('item_create_submit', {
+      picked: state.picked.length,
+      has_text: !!text,
+      has_url: !!url,
+      cover_index: state.coverIndex
+    });
+
+    var coverRaw = state.picked.length ? state.picked[state.coverIndex].raw : null;
+    var t0 = Date.now();
+
+    // 本地出图（纯浏览器运算，不碰网络）
+    var thumbJob = coverRaw
+      ? IMG.makeCover(coverRaw, null)   // 先整图作封面，AI 给了矩形再重裁
+      : Promise.resolve({ thumb: null, coverSource: null });
+
+    thumbJob.then(function (c) {
+      var coverMs = Date.now() - t0;
+      var tWrite = Date.now();
+      var sourceType = (state.picked.length && (text || url)) ? 'mixed'
+        : (state.picked.length ? 'image' : 'text');
+      var images = state.picked.map(function (p) { return p.raw; });
+      return S.createItem({
+        source_type: sourceType,
+        raw_text: text || null,
+        source_url: url || null,
+        source_platform: plat || null,
+        my_note: note || null,
+        category: cfg.fallbackCategory,
+        cover_thumb: c.thumb ? c.thumb.base64 : null,
+        // cover_source 是 NOT NULL 列。纯文本素材没有封面，必须显式给 'none'——
+        // 之前这里传 null，导致「只填文本、不传图」这条 F1-1/F3-2 的路径直接写库失败。
+        cover_source: c.thumb ? 'raw' : 'none',
+        cover_index: state.coverIndex,
+        status: 'pending'
+      }).then(function (item) {
+        var writeMs = Date.now() - tWrite;
+        // 先把卡片放出来，不等图片写完——素材这一刻已经存在了，
+        // 这就是 F1-4「本地 ≤1 秒出图入库」要的效果。
+        if (coverRaw) state.raws[item.id] = { cover: coverRaw };
+        item._coverMs = coverMs;
+        item._writeMs = writeMs;
+        item._startedAt = Date.now();
+        state.items.unshift(item);
+        renderList();
+        clearForm();
+        submitting = false;
+        $('btnSubmit').disabled = false;
+        $('btnSubmit').textContent = '收进灵感库';
+
+        // 1600px 原件随后写入；AI 排在它后面，保证 AI 要用时图肯定在库里
+        var imgJob = images.length
+          ? S.addImages(item.id, images).catch(function (e) {
+              toast('原件写入失败：' + fmtErr(e));
+            })
+          : Promise.resolve();
+
+        return imgJob.then(function () {
+          // E5：这条入库完成。**这是 A1 的判据**——从打开录入页到入库的总耗时。
+          // 刻意放在这里而不是「AI 跑完」那一刻：PRD F1-4 已经把 AI 改成异步补齐
+          // 且不计入阻塞时长，把 AI 算进来会让这个指标永远超 30 秒，也就失去意义。
+          T.event('item_create_finish', {
+            item_id: item.id,
+            ms: Date.now() - pageOpenedAt,
+            cover_ms: coverMs,
+            write_ms: writeMs,
+            images: images.length
+          });
+          toast('已入库（出图 ' + coverMs + 'ms · 入库 ' + writeMs + 'ms）'
+            + (images.length ? '，' + images.length + ' 张原件已写' : '')
+            + '。AI 识别接着跑。');
+          enqueueAi(item.id);
+        });
+      });
+    }).catch(function (e) {
+      submitting = false;
+      $('btnSubmit').disabled = false;
+      $('btnSubmit').textContent = '收进灵感库';
+      showFormErr('入库失败：' + fmtErr(e) + '。内容还在这儿，可以重试。');
+    });
+  });
+
+  /* ---------- AI 识别（跑在幕布后面，不阻塞录入） ---------- */
+
+  function findItem(id) {
+    return state.items.filter(function (x) { return x.id === id; })[0];
+  }
+
+  // 内存里没有原件时（比如页面刷新过），从库里的 1600px 原件重新解码。
+  function ensureRaw(itemId) {
+    var held = state.raws[itemId];
+    if (held && held.cover) return Promise.resolve(held.cover);
+    return S.getImages(itemId).then(function (imgs) {
+      if (!imgs.length) throw new Error('这条素材没有图片，无法重裁封面');
+      var item = findItem(itemId);
+      var idx = item ? (item.cover_index || 0) : 0;
+      var img = imgs[Math.min(idx, imgs.length - 1)];
+      return fetch(S.toDataUrl(img.mime, img.data_base64))
+        .then(function (r) { return r.blob(); })
+        .then(IMG.processRaw)
+        .then(function (raw) { state.raws[itemId] = { cover: raw }; return raw; });
+    });
+  }
+
+  function runAi(itemId) {
+    var item = findItem(itemId);
+    if (!item) return Promise.resolve();
+    var tax = state.taxonomy;
+    var patch = { status: 'pending' };
+    var hasImg = !!(state.raws[itemId] && state.raws[itemId].cover);
+    // AI 看的是「当前的封面那张图」（ensureRaw 就按 cover_index 取），
+    // 所以 AI 给的矩形属于 cover_index 这一张。等会儿要按这个 seq 落到 item_images。
+    var aiSeq = item.cover_index || 0;
+
+    return ensureRaw(itemId).catch(function () { return null; }).then(function (coverRaw) {
+      var aiImageJob = coverRaw ? IMG.makeAiInput(coverRaw) : Promise.resolve(null);
+      return aiImageJob.then(function (aiImage) {
+        return AI.analyze({
+          aiImage: aiImage,
+          text: item.raw_text || '',
+          url: item.source_url || '',
+          taxonomy: tax
+        }).then(function (r) {
+          patch.status = 'done';
+          // 名字为空时不写 null：卡片上「没有名字」和「名字是空的」要能区分开，
+          // 用空串表示「AI 判不出」，null 表示「这一列从来没被填过」。
+          patch.ai_title = r.title || '';
+          patch.ai_summary = r.summary;
+          patch.ai_caption = r.caption;
+          patch.ocr_text = r.ocrText;
+          patch.ai_tags = r.tags;
+          if (r.platform && !item.source_platform) patch.source_platform = r.platform;
+          if (r.category) patch.category = r.category;
+          // AI 说什么原样留一份（F5-6 要拿它做黄色对照、F2-8 要拿它算差异）。
+          // 用户改过的字段会被覆盖，但这份快照不会被用户改动影响。
+          patch.ai_raw = AI.snapshot(r);
+          // AI 给了可信矩形就重裁封面；矩形不可信时保持整图（封面不因 AI 而变差）
+          if (coverRaw && r.rect) {
+            return IMG.makeCover(coverRaw, r.rect).then(function (c) {
+              if (c.coverSource === 'crop') {
+                patch.cover_thumb = c.thumb.base64;
+                patch.cover_source = 'crop';
+              }
+              patch._ai = { ms: r.ms, firstChunkMs: r.firstChunkMs, rect: r.rect, categoryCorrected: r.categoryCorrected, outOfList: r.categoryOutOfList };
+              return patch;
+            });
+          }
+          patch._ai = { ms: r.ms, firstChunkMs: r.firstChunkMs, rect: null, categoryCorrected: r.categoryCorrected, outOfList: r.categoryOutOfList };
+          return patch;
+        }).catch(function (e) {
+          // F2-7：AI 失败不丢素材。素材已在库里，这里只调状态。
+          // 但要注意：如果这条之前已经识别成功过（重跑失败），不能把
+          // 好结果标成失败——那会让界面出现「失败」却有摘要的矛盾状态。
+          var hasResult = !!(item.ai_summary || (item.ai_tags && item.ai_tags.length));
+          patch.status = hasResult ? 'done' : 'failed';
+          patch._ai = {
+            error: (e && e.code === 'AI_TIMEOUT') ? 'timeout' : '',
+            msg: fmtErr(e),
+            retryFailed: hasResult
+          };
+          return patch;
+        });
+      });
+    }).then(function (finalPatch) {
+      var local = finalPatch._ai || {};
+      delete finalPatch._ai;
+      return S.updateItem(itemId, finalPatch).then(function (saved) {
+        // 用服务端回来的行刷新本地模型，保证界面与库一致
+        var i = state.items.indexOf(item);
+        if (i >= 0 && saved) {
+          state.items[i] = Object.assign({}, item, saved);
+        } else if (i >= 0) {
+          Object.assign(state.items[i], finalPatch);
+        }
+        state.items[i >= 0 ? i : 0]._ai = local;
+        renderList();
+
+        // E3：AI 返回。成功与否用最终状态判断，不看 local.error——
+        // 那个字段只在超时才非空，非超时的失败也是空串，拿它当信号会误报成功。
+        T.event('ai_process_done', {
+          item_id: itemId,
+          ok: finalPatch.status === 'done',
+          ms: local.ms || null,
+          ttft_ms: local.firstChunkMs || null,
+          got_rect: !!local.rect,
+          category_corrected: !!local.categoryCorrected,
+          had_image: hasImg
+        });
+
+        // 矩形按**图**存一份（2026-09-20 新增）。只留 items.ai_raw.rect 是不够的：
+        // 那只对应「送进模型的那一张」，用户一旦换封面图，那张新图就没有矩形可用，
+        // 「按 AI 矩形重裁」也就无从下手（A14 实测踩到）。
+        if (local.rect) {
+          return S.setImageRect(itemId, aiSeq, local.rect).catch(function (e) {
+            // 存矩形失败不能让这次识别看起来失败——AI 的结果已经写进 items 了。
+            console.warn('[ai] 裁切矩形没存上：' + S.describe(e));
+          });
+        }
+      });
+    }).catch(function (e) {
+      var it = findItem(itemId);
+      if (it) { it.status = 'failed'; it._ai = { msg: fmtErr(e) }; renderList(); }
+    });
+  }
+
+  function retry(itemId) {
+    var item = findItem(itemId);
+    if (!item) return;
+    item.status = 'pending';
+    item._ai = null;
+    renderList();
+    enqueueAi(itemId);
+  }
+
+  /* ---------- 列表渲染 ---------- */
+
+  var PLATFORMS = ['小红书', '公众号', '网页', '其他'];
+
+  function statusHtml(it) {
+    if (it.status === 'pending') {
+      if (state.running !== it.id) {
+        var pos = aiQueue.indexOf(it.id);
+        return '<span class="st pending"><span class="spin"></span>排队中 · 前面还有 '
+          + (pos < 0 ? 1 : pos + 1) + ' 条</span>';
+      }
+      var sec = Math.max(0, Math.round((Date.now() - (it._startedAt || Date.now())) / 1000));
+      return '<span class="st pending"><span class="spin"></span>AI 识别中 · 已 ' + sec + ' 秒</span>';
+    }
+    if (it.status === 'failed') {
+      // 失败原因只存在内存里，刷新页面后就不知道是超时还是报错了，
+      // 所以只在本次会话内说原因，否则给一句不撒谎的通用话。
+      var why = (it._ai && it._ai.error === 'timeout')
+        ? '识别超时（已降级：封面用整图，抽屉标签留空）'
+        : (it._ai && it._ai.msg ? '识别失败：' + it._ai.msg : '上次识别没完成');
+      return '<span class="st failed">' + why + ' · 点「重跑 AI」可再试</span>';
+    }
+    var ms = it._ai && it._ai.ms ? ' · ' + (it._ai.ms / 1000).toFixed(1) + 's' : '';
+    var ttft = it._ai && it._ai.firstChunkMs ? '（首字 ' + (it._ai.firstChunkMs / 1000).toFixed(1) + 's）' : '';
+    return '<span class="st done">已完成' + ms + ttft + '</span>';
+  }
+
+  function chipsHtml(it) {
+    var owner = window.Elangit.auth.isOwner();
+    var ai = it.ai_tags || [], mine = it.my_tags || [];
+    var rm = function (t, from) {
+      return owner ? '<x data-act="rmtag" data-tag="' + esc(t) + '" data-from="' + from + '">×</x>' : '';
+    };
+    var html = ai.map(function (t) {
+      return '<span class="chip aig">' + esc(t) + rm(t, 'ai') + '</span>';
+    }).join('');
+    html += mine.map(function (t) {
+      return '<span class="chip" style="background:var(--g3b);color:var(--g3)">' + esc(t) + rm(t, 'my') + '</span>';
+    }).join('');
+    if (owner) html += '<input class="tagadd" data-act="addtag" placeholder="+ 加标签" maxlength="12">';
+    return html;
+  }
+
+  function catOptions(cur) {
+    return state.taxonomy.categories.map(function (c) {
+      return '<option' + (c.name === cur ? ' selected' : '') + '>' + esc(c.name) + '</option>';
+    }).join('');
+  }
+
+  function platOptions(cur) {
+    return '<option value="">未判断</option>' + PLATFORMS.map(function (p) {
+      return '<option' + (p === cur ? ' selected' : '') + '>' + p + '</option>';
+    }).join('');
+  }
+
+  function itemHtml(it) {
+    var thumb = it.cover_thumb
+      ? '<img src="' + S.toDataUrl('image/jpeg', it.cover_thumb) + '" data-act="shot">'
+      : '';
+    var coverNote = it.cover_source === 'crop' ? '封面：从截图裁出主体'
+      : (it.cover_source === 'raw' ? '封面：整图（未裁）' : '无图');
+
+    var summary = it.ai_summary
+      ? esc(it.ai_summary)
+      : (it.status === 'pending' ? 'AI 读完就会填在这里…' : '（没有摘要）');
+
+    var meta = [];
+    if (it.raw_text) meta.push('文本 ' + it.raw_text.length + ' 字');
+    if (it.source_url) meta.push(esc(it.source_url).slice(0, 60));
+    if (it._coverMs != null) meta.push('出图 ' + it._coverMs + 'ms · 入库 ' + it._writeMs + 'ms');
+
+    var warn = '';
+    if (it._ai && it._ai.categoryCorrected) {
+      warn = '<div class="warnline">AI 原本给的是「' + esc(it._ai.outOfList || '空')
+        + '」，不在抽屉清单里，已按 F2-6 落到兜底抽屉。可以在这里改成合适的抽屉。</div>';
+    }
+    if (it._ai && it._ai.retryFailed) {
+      warn = '<div class="warnline">上一次重跑没成功（'
+        + (it._ai.error === 'timeout' ? '超过 60 秒未返回' : esc(it._ai.msg || '未知原因'))
+        + '），下面保留的是更早那次的结果。</div>' + warn;
+    }
+
+    return '<div class="item" data-id="' + it.id + '">'
+      + '<div class="pic">' + thumb
+        + '<div class="sub">' + coverNote + '</div>'
+        + '<div class="sub">' + (meta.join('<br>') || '无文本') + '</div>'
+      + '</div>'
+      + '<div class="body">'
+        + '<div class="top">' + statusHtml(it)
+          + '<span class="muted">' + esc(it.category || '—') + '</span>'
+          + '<div class="spacer"></div>'
+          + '<a class="linkbtn" href="item.html?id=' + it.id + '">详情</a>'
+          + '<span class="owner-only">'
+            + '<button class="btn ghost sm" data-act="toggle">' + (it._open ? '收起修改' : '改 AI 结果') + '</button>'
+            + '<button class="btn ghost sm" data-act="retry">重跑 AI</button>'
+          + '</span>'
+        + '</div>'
+        + '<div class="sum' + (it.ai_summary ? '' : ' empty') + '" data-act="togglesum">' + summary + '</div>'
+        + '<div class="chips">' + chipsHtml(it) + '</div>'
+        + (warn || '')
+        + (it._open ? '<div class="owner-only">' + editHtml(it) + '</div>' : '')
+      + '</div>'
+    + '</div>';
+  }
+
+  function editHtml(it) {
+    return '<div class="edit">'
+      + '<label class="fl">摘要</label>'
+      + '<input class="inp" data-f="ai_summary" value="' + esc(fieldVal(it, 'ai_summary')) + '">'
+      + '<div class="row2">'
+        + '<div><label class="fl">抽屉（只能从既有 6 个里选）</label>'
+        + '<select class="inp" data-f="category">' + catOptions(it.category) + '</select></div>'
+        + '<div><label class="fl">来源平台</label>'
+        + '<select class="inp" data-f="source_platform">' + platOptions(it.source_platform) + '</select></div>'
+      + '</div>'
+      + '<label class="fl">我为什么存它</label>'
+      + '<input class="inp" data-f="my_note" value="' + esc(fieldVal(it, 'my_note')) + '">'
+      + '<div class="row2">'
+        + '<div><label class="fl">画面描述（AI）</label>'
+        + '<input class="inp" data-f="ai_caption" value="' + esc(fieldVal(it, 'ai_caption')) + '"></div>'
+      + '</div>'
+      + '<label class="fl">图中文字（AI 提取，会被搜索命中）</label>'
+      + '<textarea class="inp" data-f="ocr_text" style="min-height:64px">' + esc(fieldVal(it, 'ocr_text')) + '</textarea>'
+      + '<div class="foot">'
+        + '<span class="hint">改完点保存。AI 的原值与你的改动都会留着（改动差异记录在任务 8 的埋点里落库）。</span>'
+        + '<button class="btn sm" data-act="save">保存修改</button>'
+      + '</div>'
+    + '</div>';
+  }
+
+  // AI 是异步回来的，回来时要重渲染列表。如果不先把用户正在敲的内容收起来，
+  // 别的行 AI 完成时会把他没保存的输入冲掉。所以每次渲染前先抓一份草稿。
+  function captureDrafts() {
+    var box = $('list');
+    state.items.forEach(function (it) {
+      if (!it._open) return;
+      var row = box.querySelector('.item[data-id="' + it.id + '"]');
+      if (!row) return;
+      var d = {};
+      Array.prototype.forEach.call(row.querySelectorAll('[data-f]'), function (el) {
+        d[el.getAttribute('data-f')] = el.value;
+      });
+      it._draft = d;
+    });
+  }
+
+  function fieldVal(it, f) {
+    if (it._draft && it._draft[f] !== undefined) return it._draft[f];
+    return it[f] == null ? '' : it[f];
+  }
+
+  function renderList() {
+    var box = $('list');
+    captureDrafts();
+    if (!state.items.length) {
+      box.innerHTML = '<div class="muted">还没有素材。粘贴一张截图试试。</div>';
+      ensureTicker();
+      return;
+    }
+    box.innerHTML = state.items.map(itemHtml).join('');
+    ensureTicker();
+  }
+
+  // 让「已 N 秒」真的在走，而不是渲染时定格（PRD F1-4 要求显示明确进度）。
+  // 只更新正在跑的那一条——排队中的显示排队位次，不显示秒数。
+  function ensureTicker() {
+    var anyPending = state.items.some(function (i) { return i.status === 'pending'; });
+    if (anyPending && !state.ticker) {
+      state.ticker = setInterval(function () {
+        var it = findItem(state.running);
+        if (!it || it.status !== 'pending') return;
+        var row = $('list').querySelector('.item[data-id="' + it.id + '"] .st');
+        if (row) {
+          var sec = Math.max(0, Math.round((Date.now() - (it._startedAt || Date.now())) / 1000));
+          row.innerHTML = '<span class="spin"></span>AI 识别中 · 已 ' + sec + ' 秒';
+        }
+      }, 1000);
+    } else if (!anyPending && state.ticker) {
+      clearInterval(state.ticker);
+      state.ticker = null;
+    }
+  }
+
+  /* ---------- 列表上的交互 ---------- */
+
+  $('list').addEventListener('click', function (e) {
+    var row = e.target.closest('.item');
+    if (!row) return;
+    var id = Number(row.getAttribute('data-id'));
+    var it = findItem(id);
+    if (!it) return;
+    var act = e.target.getAttribute('data-act');
+
+    if (act === 'toggle' || act === 'togglesum') {
+      it._open = !it._open;
+      renderList();
+    } else if (act === 'retry') {
+      retry(id);
+      toast('已排进队列重跑（AI 调用是串行的）');
+    } else if (act === 'rmtag') {
+      var tag = e.target.getAttribute('data-tag');
+      var from = e.target.getAttribute('data-from');
+      var key = from === 'my' ? 'my_tags' : 'ai_tags';
+      it[key] = (it[key] || []).filter(function (t) { return t !== tag; });
+      renderList();
+    } else if (act === 'save') {
+      saveEdits(row, it);
+    } else if (act === 'shot') {
+      openShot(id);
+    }
+  });
+
+  $('list').addEventListener('keydown', function (e) {
+    if (e.key !== 'Enter') return;
+    var inp = e.target;
+    if (inp.getAttribute && inp.getAttribute('data-act') === 'addtag') {
+      e.preventDefault();
+      var row = inp.closest('.item');
+      var it = findItem(Number(row.getAttribute('data-id')));
+      var v = inp.value.trim().replace(/^#/, '').slice(0, 12);
+      if (!v || !it) return;
+      var all = (it.ai_tags || []).concat(it.my_tags || []);
+      if (all.indexOf(v) < 0) it.my_tags = (it.my_tags || []).concat([v]);
+      renderList();
+      var again = $('list').querySelector('.item[data-id="' + it.id + '"] input[data-act="addtag"]');
+      if (again) again.focus();
+    }
+  });
+
+  function saveEdits(row, it) {
+    var patch = {};
+    Array.prototype.forEach.call(row.querySelectorAll('[data-f]'), function (el) {
+      var f = el.getAttribute('data-f');
+      var v = el.value.trim();
+      patch[f] = v || null;
+    });
+    patch.ai_tags = it.ai_tags || [];
+    patch.my_tags = it.my_tags || [];
+    S.updateItem(it.id, patch).then(function (saved) {
+      var i = state.items.indexOf(it);
+      if (i >= 0) state.items[i] = Object.assign({}, it, saved || patch);
+      delete state.items[i >= 0 ? i : 0]._draft;
+      renderList();
+      toast('已保存');
+    }).catch(function (e) {
+      toast('保存失败：' + fmtErr(e));
+    });
+  }
+
+  /* ---------- 看原图（F1-8：原件永远完整保留） ---------- */
+
+  function openShot(id) {
+    var box = $('shotBox');
+    box.innerHTML = '<div class="muted">读原图中…</div>';
+    $('shotModal').classList.add('on');
+    S.getImages(id).then(function (imgs) {
+      if (!imgs.length) { box.innerHTML = '<div class="muted">这条没有图片</div>'; return; }
+      box.innerHTML = imgs.map(function (im, i) {
+        return '<div style="margin-bottom:14px">'
+          + '<div class="muted" style="margin-bottom:6px">第 ' + (i + 1) + ' 张 · '
+          + im.width + '×' + im.height + ' · ' + kb(im.byte_size) + '</div>'
+          + '<img src="' + S.toDataUrl(im.mime, im.data_base64) + '"></div>';
+      }).join('');
+    }).catch(function (e) {
+      box.innerHTML = '<div class="muted">读原图失败：' + esc(fmtErr(e)) + '</div>';
+    });
+  }
+
+  document.addEventListener('click', function (e) {
+    if (e.target.hasAttribute && e.target.hasAttribute('data-close')) {
+      $('shotModal').classList.remove('on');
+    }
+    if (e.target.id === 'shotModal') $('shotModal').classList.remove('on');
+  });
+
+  /* ---------- 所有者状态 ---------- */
+
+  // 录入页整页都是写操作，所以访客进来时不给表单，只给一句说明与解锁入口。
+  window.Elangit.onOwnerChange = function () { applyOwnerMode(); };
+  function applyOwnerMode() {
+    var on = window.Elangit.auth.isOwner();
+    $('needOwner').style.display = on ? 'none' : 'block';
+    if (!on) {
+      $('needOwner').textContent = '这个页面只做写入：收素材、跑 AI、改结果。'
+        + '当前是只读浏览状态，点右上角「解锁编辑」输入口令后才会显示录入表单。';
+    }
+    renderList();
+  }
+  window.Elangit.ownerBar.mount();
+  applyOwnerMode();
+
+  // E1：打开录入页。放在这里（而不是放在启动链的末尾）是因为它就是
+  // 「E5 总耗时」的起点 pageOpenedAt 的语义对应物——两者必须同一个时刻，
+  // 否则 A1 的均值算出来会少一段。
+  T.event('item_create_start', {});
+
+  /* ---------- 启动 ---------- */
+
+  S.loadTaxonomy().then(function (tax) {
+    state.taxonomy = tax;
+    return S.recentItems(cfg.recentLimit);
+  }).then(function (items) {
+    state.items = items.map(function (it) { return Object.assign({}, it, { _open: false }); });
+    // 上次没跑完的（识别中／失败）在页面回来后重新排队，F2-7 + F1-4。
+    // 只对所有者做：重跑 AI 是写操作，访客身份下会被门禁挡掉，白报一堆错。
+    renderList();
+    var stuck = window.Elangit.auth.isOwner()
+      ? state.items.filter(function (it) { return it.status === 'pending'; })
+      : [];
+    if (stuck.length) {
+      toast('有 ' + stuck.length + ' 条上次没识别完，正在接着跑');
+      stuck.forEach(function (it) { enqueueAi(it.id); });
+    }
+  }).catch(function (e) {
+    $('listErr').style.display = 'block';
+    $('listErr').textContent = '读数据库失败：' + fmtErr(e);
+    $('list').innerHTML = '<div class="muted">读不到数据。检查一下网络，或刷新页面试试。</div>';
+  });
+})();
+</script>
+</body>
+</html>

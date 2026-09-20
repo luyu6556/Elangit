@@ -1,0 +1,448 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Elangit · 灵感库</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header>
+  <a class="logo" href="index.html"><i></i>Elangit</a>
+  <nav class="hnav">
+    <a href="index.html" class="on">灵感库</a>
+    <a href="add.html" class="owner-only">收进灵感</a>
+    <a href="stats.html" class="owner-only">数据</a>
+  </nav>
+  <div class="spacer"></div>
+  <span class="muted" id="hdrNote">加载中…</span>
+  <span id="ownerBar"></span>
+</header>
+
+<div class="layout">
+  <aside>
+    <div class="sec">
+      <h3>抽屉</h3>
+      <div id="navCats"></div>
+    </div>
+    <div class="sec">
+      <h3>标签</h3>
+      <div id="navTags"></div>
+    </div>
+    <!-- 收藏夹分享（F6-1）。放在侧栏而不是顶栏：顶栏已经有 logo、导航、
+         计数和所有者开关，再塞一颗按钮会在 760~1000px 这段挤坏（9.5 踩过）。 -->
+    <div class="sec owner-only">
+      <h3>分享这个收藏夹</h3>
+      <div id="shareBox"><div class="shnone">读取中…</div></div>
+    </div>
+  </aside>
+
+  <main class="list">
+    <div class="bar">
+      <div class="search">
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><circle cx="7" cy="7" r="4.6" stroke="#1C1B19" stroke-width="1.4"/><path d="M10.6 10.6 14 14" stroke="#1C1B19" stroke-width="1.4" stroke-linecap="round"/></svg>
+        <input id="q" type="search" placeholder="搜项目名 / 摘要 / 画面描述 / 图中文字 / 原文 / 标签 / 备注" autocomplete="off">
+      </div>
+      <div class="spacer"></div>
+      <span class="meta" id="count"></span>
+      <button class="reset" id="reset" style="display:none">清空筛选</button>
+    </div>
+    <div class="warnline" id="fbWarn" style="display:none"></div>
+    <div class="errcard" id="listErr" style="display:none"></div>
+    <div class="grid" id="grid"></div>
+    <div class="emptystate" id="empty" style="display:none"></div>
+  </main>
+</div>
+
+<div class="mask" id="shotModal">
+  <div class="shot">
+    <div class="bar">
+      <h3>原始截图（1600px 原件，永不裁剪）</h3>
+      <button class="btn ghost sm" data-close>关闭</button>
+    </div>
+    <div class="box" id="shotBox"></div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@tencent-ai/workbuddy-cloud-sdk@dev/lib/index.global.js"></script>
+<script src="config.js"></script>
+<script src="auth.js"></script>
+<script src="cards.js"></script>
+<script src="store.js"></script>
+<script src="track.js"></script>
+<script src="ownerbar.js"></script>
+<script>
+(function () {
+  'use strict';
+  var S = window.Elangit.store, cfg = window.Elangit.config, C = window.Elangit.cards;
+  var T = window.Elangit.track;
+  var $ = function (id) { return document.getElementById(id); };
+
+  var PAGE = 24;          // 每屏先渲染这么多，滚动到底再往下补（F3-4）
+
+  var state = {
+    taxonomy: null,
+    index: [],            // 全部素材的文本索引（不含图）
+    filtered: [],         // 过滤后的行，保持时间倒序
+    cards: {},            // id -> {cover_thumb, ...} 按需取
+    shown: 0,
+    q: '', cat: '全部', tags: [],
+    fetching: false
+  };
+
+  /* ---------- 小工具 ---------- */
+
+  // 渲染素材外观的部分一律走 cards.js：卡片信息顺序与标签配色是两页共用的，
+  // 复制一份到这边就会各自漂移（分享页是给外人看的那一面，最不该不一致）。
+  var esc = C.esc, fmtTime = C.fmtTime;
+  function fmtErr(e) { return S.describe(e); }
+
+  var toastTimer = null;
+  function toast(msg) {
+    var t = $('toast');
+    t.textContent = msg;
+    t.classList.add('on');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () { t.classList.remove('on'); }, 2600);
+  }
+
+  /* ---------- 侧栏：抽屉与标签（带计数） ---------- */
+
+  /* ---------- 侧栏：抽屉与标签（带计数） ---------- */
+
+  // 计数与分组规则都在 cards.js 里：分享页要用同一套。
+  // 两边各写一份的话，「空抽屉不显示」「AI 新造标签单列一组」这些规则
+  // 一旦只改了一边，分享页就会出现主站点不到的筛选项。
+  function renderNav() {
+    $('navCats').innerHTML = C.navCatsHtml(state.taxonomy, state.index, state.cat);
+    $('navTags').innerHTML = C.navTagsHtml(state.taxonomy, state.index, state.tags);
+  }
+
+  /* ---------- 过滤（F4-1 ~ F4-4） ---------- */
+
+  // 检索口径（命中哪些字段、多标签是「与」）放在 cards.js，
+  // 分享页要搜出同样的结果，不能两套规则。
+  function matches(it) { return C.matches(it, state); }
+
+  function applyFilter() {
+    state.filtered = state.index.filter(matches);
+    state.shown = Math.min(PAGE, state.filtered.length);
+    renderNav();
+    renderGrid();
+  }
+
+  /* ---------- 埋点：E6 / E7 / E8 ---------- */
+
+  // 只在**用户动作**之后记，初始化那次不记——否则每次打开页面都会多出一条
+  // 「搜索」，报表里的搜索次数就没意义了。所以不是挂在 applyFilter 里，
+  // 而是由三个交互入口显式调用。
+  function trackSearch(kind) {
+    var filtering = !!(state.q || state.tags.length || state.cat !== '全部');
+    var n = state.filtered.length;
+    T.event('search_execute', {
+      kind: kind, q: state.q, cat: state.cat, tags: state.tags.slice(),
+      n: n, total: state.index.length, filtered: filtering
+    });
+    // 记下刻点，供 E7 算「从搜索到点击」的耗时（A4 的判据）。没搜过就不记 E7。
+    T.markSearch();
+    if (!n && filtering) {
+      T.event('search_zero_result', { q: state.q, cat: state.cat, tags: state.tags.slice() });
+    }
+  }
+
+  /* ---------- 卡片 ---------- */
+
+  // 卡片长什么样完全由 cards.js 决定（信息顺序是用户指定的，分享页同款）。
+  function cardHtml(it) {
+    return C.cardHtml(it, state.cards[it.id] || {}, state.taxonomy);
+  }
+
+  function renderGrid() {
+    var page = state.filtered.slice(0, state.shown);
+    $('grid').innerHTML = page.map(cardHtml).join('');
+    $('grid').style.display = page.length ? '' : 'none';
+
+    var filtering = !!(state.q || state.tags.length || state.cat !== '全部');
+
+    if (!page.length) {
+      $('empty').style.display = '';
+      $('empty').innerHTML = C.emptyHtml(state.index.length, filtering, { canAdd: true });
+    } else {
+      $('empty').style.display = 'none';
+    }
+
+    $('count').textContent = C.countText(page.length, state.filtered.length);
+    $('reset').style.display = filtering ? '' : 'none';
+    $('hdrNote').textContent = state.index.length
+      ? '共 ' + state.index.length + ' 条素材' + (filtering ? '（筛选中）' : '')
+      : '还没有素材';
+
+    ensureCards(page);
+  }
+
+  // 卡片缺缩略图就补一次。写完要再跑一遍——因为请求在飞的这段时间里
+  // 用户可能又滚出一批新卡片，那批的图不会被这次请求带上。
+  function ensureCards(page) {
+    var missing = page.filter(function (it) { return !state.cards[it.id]; }).map(function (it) { return it.id; });
+    if (!missing.length || state.fetching) return;
+    state.fetching = true;
+    var batch = missing.slice(0, 60);
+    S.cardsByIds(batch).then(function (rows) {
+      rows.forEach(function (r) { state.cards[r.id] = r; });
+      // 没图的那几条也要记一笔，否则每次都会重复请求
+      batch.forEach(function (id) { if (!state.cards[id]) state.cards[id] = {}; });
+      state.fetching = false;
+      $('grid').innerHTML = state.filtered.slice(0, state.shown).map(cardHtml).join('');
+      ensureCards(state.filtered.slice(0, state.shown));
+    }).catch(function (e) {
+      state.fetching = false;
+      $('listErr').style.display = 'block';
+      $('listErr').textContent = '缩略图读不到：' + fmtErr(e);
+    });
+  }
+
+  /* ---------- 交互 ---------- */
+
+  var qTimer = null;
+  $('q').addEventListener('input', function (e) {
+    var v = e.target.value.trim();
+    clearTimeout(qTimer);
+    // 本地检索本来就能实时返回；这点延迟只是为了边打字边重渲染时画面不抖（F4-1）
+    qTimer = setTimeout(function () {
+      state.q = v;
+      applyFilter();
+      // 等用户停下来再记，否则每敲一个字都是一条 E6（防抖之后仍然只有一次）
+      if (v !== state._qTracked) { state._qTracked = v; trackSearch('q'); }
+    }, 90);
+  });
+
+  $('navCats').addEventListener('click', function (e) {
+    var b = e.target.closest('.nav-item');
+    if (!b) return;
+    state.cat = b.getAttribute('data-cat');
+    applyFilter();
+    trackSearch('cat');
+    window.scrollTo({ top: 0 });
+  });
+
+  $('navTags').addEventListener('click', function (e) {
+    var c = e.target.closest('.chip');
+    if (!c) return;
+    var t = c.getAttribute('data-tag');
+    var i = state.tags.indexOf(t);
+    if (i >= 0) state.tags.splice(i, 1); else state.tags.push(t);
+    applyFilter();
+    trackSearch('tag');
+  });
+
+  $('reset').addEventListener('click', clearFilters);
+
+  function clearFilters() {
+    state.q = ''; state.cat = '全部'; state.tags = [];
+    state._qTracked = '';
+    $('q').value = '';
+    applyFilter();
+    // 清空筛选不算「搜索」——它不是找东西，而是放弃找。记了会让搜索次数虚高。
+  }
+
+  // E7 必须在跳转**之前**写完：埋点是 fetch，页面一导航请求就被取消，写不完就永远丢了——
+  // 而 A4（10 秒内找到）完全依赖 E7，丢成系统性的就等于这条验收没法判。
+  // 但也不能让一次慢请求把点击卡住，所以给 400ms 预算：写完就走，写不完也走。
+  function goAfterLog(href, logPromise) {
+    var left = false;
+    function go() { if (left) return; left = true; location.href = href; }
+    Promise.resolve(logPromise).then(go, go);
+    setTimeout(go, 400);
+  }
+
+  document.addEventListener('click', function (e) {
+    // 卡片内部的按钮与链接优先：点「看原始截图」不该顺便跳进详情页
+    var inner = e.target.closest('[data-act="shot"], a');
+    if (inner) {
+      if (inner.getAttribute('data-act') === 'shot') {
+        openShot(Number(inner.getAttribute('data-id')));
+        return;
+      }
+      return;   // 普通链接交给浏览器
+    }
+
+    var el = e.target.closest('[data-act]');
+    if (el) {
+      var act = el.getAttribute('data-act');
+      if (act === 'open') {
+        var id = Number(el.getAttribute('data-id'));
+        var href = 'item.html?id=' + id;
+        // E7：从搜索/筛选到点开这条的耗时（A4：10 次检索里 ≥8 次能在 10 秒内找到）。
+        // 只记「进详情」这一种点击——「看原始截图」是扫一眼就走，不代表找到了目标，
+        // 混进来的话这个指标会被好看的数据稀释。
+        var since = T.sinceSearch();
+        if (!since) { location.href = href; return; }
+        goAfterLog(href, T.event('search_result_click', Object.assign({
+          item_id: id,
+          rank: state.filtered.findIndex(function (x) { return x.id === id; }) + 1
+        }, since)));
+        return;
+      }
+      if (act === 'reset') { clearFilters(); return; }
+    }
+    if (e.target.hasAttribute && e.target.hasAttribute('data-close')) $('shotModal').classList.remove('on');
+    if (e.target.id === 'shotModal') $('shotModal').classList.remove('on');
+  });
+
+  // 滚动到底继续加载（F3-4）
+  window.addEventListener('scroll', function () {
+    if (state.shown >= state.filtered.length) return;
+    var nearBottom = window.innerHeight + window.scrollY > document.body.offsetHeight - 700;
+    if (!nearBottom) return;
+    state.shown = Math.min(state.shown + PAGE, state.filtered.length);
+    renderGrid();
+  });
+
+  function openShot(id) {
+    var box = $('shotBox');
+    box.innerHTML = '<div class="muted">读原图中…</div>';
+    $('shotModal').classList.add('on');
+    S.getImages(id).then(function (imgs) {
+      if (!imgs.length) { box.innerHTML = '<div class="muted" style="padding:20px">这条没有图片</div>'; return; }
+      box.innerHTML = imgs.map(function (im, i) {
+        return '<div style="margin-bottom:14px">'
+          + '<div class="muted" style="margin-bottom:6px">第 ' + (i + 1) + ' 张 · '
+          + im.width + '×' + im.height + ' · ' + kb(im.byte_size) + '</div>'
+          + '<img src="' + S.toDataUrl(im.mime, im.data_base64) + '"></div>';
+      }).join('');
+    }).catch(function (e) {
+      box.innerHTML = '<div class="muted" style="padding:20px">读原图失败：' + esc(fmtErr(e)) + '</div>';
+    });
+  }
+
+  /* ---------- 分享开关（F6-1 / F6-4） ---------- */
+
+  // 链接形态用 /s/令牌（PRD 4.6）。它要求托管方把 /s/* 转发到 share.html；
+  // 本地由 _serve.py 做这件事。若发布时发现平台不支持，改这一个函数成
+  // '?t=' + token 即可——share.html 三种形态都认。
+  function shareUrl(token) {
+    return location.origin + location.pathname.replace(/[^/]*$/, '') + 's/' + token;
+  }
+
+  function renderShare() {
+    var box = $('shareBox');
+    if (!box) return;
+    if (!window.Elangit.auth.isOwner()) { box.innerHTML = ''; return; }
+    box.innerHTML = '<div class="shnone">读取中…</div>';
+
+    S.getSettings().then(function (st) {
+      var on = !!(st && st.share_enabled && st.share_token);
+      if (!on) {
+        box.innerHTML = '<div class="shnone">现在没有分享出去。开启后，拿到链接的人可以只读浏览整个收藏夹。</div>'
+          + '<div class="shacts"><button class="linkbtn" data-share="on">开启只读分享</button></div>';
+        return;
+      }
+      box.innerHTML =
+        '<div class="shlink">' + esc(shareUrl(st.share_token)) + '</div>'
+        + '<div class="shacts">'
+          + '<button class="linkbtn" data-share="copy">复制链接</button>'
+          + '<button class="linkbtn" data-share="open">预览访客看到的样子</button>'
+          + '<button class="linkbtn" data-share="off">关闭分享</button>'
+        + '</div>'
+        + '<div class="shnone" style="margin-top:8px">关闭后这个链接立即失效。</div>';
+    }).catch(function (e) {
+      box.innerHTML = '<div class="shnone">读分享状态失败：' + esc(fmtErr(e)) + '</div>';
+    });
+  }
+
+  function copyText(t) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      return navigator.clipboard.writeText(t).then(function () { return true; });
+    }
+    // 非安全上下文（比如用局域网 IP 打开）里没有 clipboard API。
+    // 不静默失败：把链接选中，让用户自己按 Ctrl/⌘+C。
+    var ta = document.createElement('textarea');
+    ta.value = t; ta.style.position = 'fixed'; ta.style.opacity = '0';
+    document.body.appendChild(ta); ta.select();
+    var ok = false;
+    try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+    document.body.removeChild(ta);
+    return Promise.resolve(ok);
+  }
+
+  document.addEventListener('click', function (e) {
+    var b = e.target.closest('[data-share]');
+    if (!b) return;
+    var what = b.getAttribute('data-share');
+
+    if (what === 'on') {
+      S.updateSettings({ share_enabled: true, share_token: S.newShareToken() })
+        .then(function () { toast('已开启分享'); renderShare(); })
+        .catch(function (err) { toast('开启失败：' + fmtErr(err)); });
+      return;
+    }
+    if (what === 'off') {
+      // 令牌一并清掉：只置 false 也够（share.html 两个条件都查），
+      // 但清掉令牌能保证「就算将来有人把开关误开回来，旧链接也是死的」。
+      S.updateSettings({ share_enabled: false, share_token: null })
+        .then(function () { toast('已关闭分享，原链接失效'); renderShare(); })
+        .catch(function (err) { toast('关闭失败：' + fmtErr(err)); });
+      return;
+    }
+    if (what === 'copy') {
+      var url = $('shareBox').querySelector('.shlink').textContent;
+      copyText(url).then(function (ok) {
+        toast(ok ? '链接已复制' : '复制失败，请手动选中链接复制');
+      });
+      return;
+    }
+    if (what === 'open') {
+      var u = $('shareBox').querySelector('.shlink').textContent;
+      window.open(u, '_blank', 'noopener');
+    }
+  });
+
+  window.Elangit.onOwnerChange = function () { renderShare(); };
+
+  /* ---------- 启动 ---------- */
+
+  // 顶栏的所有者开关必须挂上。少了这一句，访客看到的是一个「没有解锁入口、
+  // 也看不到收进灵感」的页面——nav 链接被 .owner-only 藏了，却没有任何地方能解锁。
+  window.Elangit.ownerBar.mount();
+  renderShare();   // 解锁状态变了会再调一次（见 onOwnerChange）
+
+  // E9：今天开过没有。每个自然日只记一条，A12「连续两周不中断」就是数它。
+  // 放在渲染之前：这条不依赖任何数据加载成功，早记早算。
+  T.session();
+
+  Promise.all([S.loadTaxonomy(), S.loadIndex()]).then(function (r) {
+    state.taxonomy = r[0];
+    state.index = r[1];
+
+    // PRD 第 8 章：兜底抽屉占比 > 10% 就提醒回去调抽屉。
+    // 样本太小时这个比例没有意义，所以满 10 条才开始提示。
+    var fb = state.taxonomy.categories.filter(function (c) { return c.is_fallback; })[0];
+    var fbCount = fb ? state.index.filter(function (x) { return x.category === fb.name; }).length : 0;
+    if (state.index.length >= 10 && fbCount / state.index.length > 0.1) {
+      $('fbWarn').style.display = 'block';
+      $('fbWarn').textContent = '有 ' + fbCount + ' / ' + state.index.length
+        + ' 条落在「' + fb.name + '」（超过 10%）。该回头调整抽屉划分了 —— PRD A13 的复盘信号。';
+    }
+    $('hdrNote').textContent = '共 ' + state.index.length + ' 条素材';
+    applyFilter();
+
+    // 从详情页删完跳回来时给一句确认，并把参数抹掉，免得刷新又说一遍
+    var del = /[?&]deleted=(\d+)/.exec(location.search);
+    if (del) {
+      toast('已删除素材 #' + del[1]);
+      history.replaceState(null, '', location.pathname);
+    }
+  }).catch(function (e) {
+    $('listErr').style.display = 'block';
+    $('listErr').textContent = '读数据库失败：' + fmtErr(e);
+    $('grid').style.display = 'none';
+    $('empty').style.display = '';
+    $('empty').innerHTML = '<b>读不到数据</b>检查一下网络，或刷新页面试试';
+  });
+})();
+</script>
+</body>
+</html>

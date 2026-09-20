@@ -1,0 +1,835 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Elangit · 素材详情</title>
+<link rel="stylesheet" href="style.css">
+<style>
+  /* 详情页专属样式；共用部分在 style.css */
+  main.detail{max-width:1240px;margin:0 auto;padding:22px 20px 100px}
+
+  .dhead{display:flex;align-items:center;gap:12px;margin-bottom:16px;flex-wrap:wrap}
+  .back{flex:none}
+  .dhead .sp{flex:1}
+
+  /* 顶栏在窄屏放不下这么多东西，先把「素材 #N」这类辅助文字让掉 */
+  @media (max-width:760px){
+    header #hdrNote{display:none}
+    header .btn.back{padding:0 9px}
+  }
+  @media (max-width:440px){
+    header .logo{font-size:0;gap:0}
+    header .btn.back{font-size:0;padding:0 11px}
+    header .btn.back:after{content:"←";font-size:14px}
+  }
+
+
+
+  .covacts{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+  .covrow{display:flex;gap:8px;align-items:center;font-size:12px;color:var(--ink-3);margin-top:10px;flex-wrap:wrap}
+
+
+  .fields .fl:first-of-type{margin-top:6px}
+  .ro.small{font-size:12.5px;color:var(--ink-2)}
+
+  /* F5-6：AI 原先的猜测留在选项上，用黄色虚线框标出来供对照 */
+  .chip.pickable{cursor:pointer}
+  .chip.pickable:hover{opacity:.8}
+  .chip.aiguess{border:1.5px dashed #BA7517}
+  .chip.cur{outline:1.5px solid currentColor;outline-offset:-1px}
+  .aiguessline{font-size:11.5px;color:var(--warn);background:var(--warnb);border-radius:6px;padding:5px 9px;margin-top:8px;display:inline-block}
+
+  .tagadd{width:104px;border:1px dashed var(--line-2);border-radius:20px;padding:5px 9px;font-size:12px;outline:none}
+
+  .kv{display:flex;gap:10px;font-size:12.5px;color:var(--ink-3);margin-bottom:5px}
+  .kv b{font-weight:400;color:var(--ink-2);min-width:64px;flex:none}
+
+  .danger{margin-top:6px}
+  .danger .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .btn.del{background:#B3261E}
+  .btn.del:hover{opacity:.9}
+
+</style>
+</head>
+<body>
+
+<header>
+  <a class="logo" href="index.html"><i></i>Elangit</a>
+  <!-- 返回按钮放在顶栏而不是正文顶部：顶栏是 sticky 的，滚到哪儿都在。
+       原先只有正文顶部一行灰色小字「← 返回灵感库」，一滚动就出屏幕，
+       用户找不着——这是真实反馈，不是设想。 -->
+  <a class="btn ghost sm back" href="index.html">← 回到灵感库</a>
+  <nav class="hnav">
+    <a href="add.html" class="owner-only">收进灵感</a>
+  </nav>
+  <div class="spacer"></div>
+  <span class="muted" id="hdrNote"></span>
+  <span id="ownerBar"></span>
+</header>
+
+<main class="detail">
+  <div class="errcard" id="err" style="display:none"></div>
+
+  <div id="wrap" style="display:none">
+    <div class="dhead">
+      <span class="muted" id="dCrumb">素材</span>
+      <div class="sp"></div>
+      <span class="st" id="dStatus"></span>
+    </div>
+
+    <div class="dcols">
+      <section class="col-media">
+        <div class="panel">
+          <h2>封面 <span class="muted" id="coverNote"></span></h2>
+          <div class="coverbox" id="coverBox"></div>
+          <div class="covacts owner-only" id="coverActs"></div>
+          <div class="covrow" id="coverRow"></div>
+        </div>
+        <div class="panel">
+          <h2>全部原图 <span class="muted" id="imgNote"></span></h2>
+          <div class="shots" id="shots"></div>
+        </div>
+      </section>
+
+      <section class="col-fields fields" id="fields"></section>
+    </div>
+  </div>
+</main>
+
+<div class="mask" id="zoom">
+  <div class="shot">
+    <div class="bar">
+      <h3 id="zoomTitle">原图</h3>
+      <button class="btn ghost sm" data-close>关闭</button>
+    </div>
+    <div class="box" id="zoomBox"></div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@tencent-ai/workbuddy-cloud-sdk@dev/lib/index.global.js"></script>
+<script src="config.js"></script>
+<script src="auth.js"></script>
+<script src="pipeline.js"></script>
+<script src="store.js"></script>
+<!-- ai.js 是 2026-09-20 才加进来的：封面重裁要能对「换了之后的封面图」现场
+     判一次矩形（F5-8 第三条兜底），所以详情页也需要 AI 层。
+     它依赖 store（模块顶层就取 store.cloud），必须排在 store.js 之后。 -->
+<script src="ai.js"></script>
+<script src="diff.js"></script>
+<script src="track.js"></script>
+<script src="ownerbar.js"></script>
+<script>
+(function () {
+  'use strict';
+  var S = window.Elangit.store, cfg = window.Elangit.config, A = window.Elangit.auth,
+      IMG = window.Elangit.imaging, OB = window.Elangit.ownerBar,
+      AI = window.Elangit.ai, T = window.Elangit.track, D = window.Elangit.diff;
+  var $ = function (id) { return document.getElementById(id); };
+
+  var id = Number((/[?&]id=(\d+)/.exec(location.search) || [])[1] || 0);
+
+  var state = {
+    item: null,
+    imgs: [],        // item_images，按 seq 升序
+    taxonomy: null,
+    saving: false
+  };
+
+  /* ---------- 小工具 ---------- */
+
+  function esc(s) { return OB.esc(s); }
+  function fmtErr(e) { return S.describe(e); }
+  function kb(n) { return (n / 1024).toFixed(0) + 'KB'; }
+
+  var toastTimer = null;
+  function toast(msg) {
+    var t = $('toast');
+    t.textContent = msg;
+    t.classList.add('on');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () { t.classList.remove('on'); }, 2600);
+  }
+
+  function fmtTime(iso, withTime) {
+    if (!iso) return '';
+    var d = new Date(iso);
+    if (isNaN(d.getTime())) return '';
+    var p = function (n) { return ('0' + n).slice(-2); };
+    var s = d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate());
+    if (withTime) s += ' ' + p(d.getHours()) + ':' + p(d.getMinutes());
+    return s;
+  }
+
+  function showErr(msg) {
+    var el = $('err');
+    if (!msg) { el.style.display = 'none'; el.textContent = ''; return; }
+    el.style.display = 'block';
+    el.textContent = msg;
+  }
+
+  function tagChip(name, on, opts) {
+    var o = opts || {};
+    var c = (state.taxonomy && state.taxonomy.tagColor[name]) || null;
+    var style = c ? 'color:' + c.c + ';background:' + c.bg : 'color:var(--ink-2);background:#F1EFEB';
+    var cls = 'chip' + (o.clickable ? ' pickable' : '') + (on ? ' cur' : '') + (o.aiguess ? ' aiguess' : '');
+    var attrs = o.attrs || '';
+    return '<span class="' + cls + '" ' + attrs + ' style="' + style + '">' + esc(name)
+      + (o.rm ? '<x data-act="rmtag" data-tag="' + esc(name) + '" data-from="' + o.rm + '">×</x>' : '')
+      + '</span>';
+  }
+
+  /* ---------- 保存 ---------- */
+
+  // 每个写路径都从这儿走：串行化 + 失败要说清。
+  // 抽屉、标签、来源是三处「点了就存」的地方（F5-2），
+  // 它们各自发一次请求会在快速连点时乱序落库，所以在这里排队。
+  var chain = Promise.resolve();
+  function save(patch, okMsg) {
+    chain = chain.then(function () {
+      return S.updateItem(id, patch).then(function (saved) {
+        // 用服务端回来的行刷新本地模型，保证界面与库一致
+        if (saved) state.item = saved;
+        render();
+        toast(okMsg || '已保存');
+      }).catch(function (e) {
+        toast('保存失败：' + fmtErr(e));
+        throw e;
+      });
+    }).catch(function () { /* 已提示，链继续 */ });
+    return chain;
+  }
+
+  /* ---------- 渲染：封面与图片 ---------- */
+
+  function coverNoteText() {
+    var it = state.item;
+    if (!it.cover_thumb) return '（这条没有封面）';
+    if (it.cover_source === 'crop') return '从截图裁出主体';
+    if (it.cover_source === 'raw') return '整图（未裁）';
+    return it.cover_source || '';
+  }
+
+  // 裁切矩形按**图**取，不按素材取（2026-09-20 改）。
+  //
+  // 原先这里读的是 `items.ai_raw.rect`，那是「送进模型那张图」的矩形，配上
+  // `cover_index === 0` 的硬条件。结果：用户在详情页把封面换成第 2 张图之后，
+  // 第 2 张图永远没有矩形可用，而按钮又只在第 1 张时才出现 —— 「换封面」和
+  // 「重裁」两条兜底互相堵死，换了图的封面再也裁不了（A14 实测踩到：
+  // 纽约高线公园那条的封面留着右侧一整条文字面板）。
+  // 现在录入时把矩形按 seq 写进 item_images.ai_rect，这里按当前封面图的
+  // seq 取，与 cover_index 是不是 0 无关。
+  function rectFor(ci) {
+    var img = state.imgs[ci];
+    var r = img && img.ai_rect;
+    if (!r) return null;
+    var l = Number(r.left), t = Number(r.top), rr = Number(r.right), b = Number(r.bottom);
+    if (!isFinite(l) || !isFinite(t) || !isFinite(rr) || !isFinite(b)) return null;
+    if (rr <= l || b <= t) return null;
+    if (l === 0 && t === 0 && rr === 100 && b === 100) return null;   // 等于整图 = 不用裁
+    return { left: l, top: t, right: rr, bottom: b };
+  }
+
+  function renderCover() {
+    var it = state.item;
+    var box = $('coverBox');
+    box.innerHTML = it.cover_thumb
+      ? '<img src="' + S.toDataUrl('image/jpeg', it.cover_thumb) + '" data-act="zoom" data-i="' + (it.cover_index || 0) + '" alt="封面">'
+      : '<div class="none">这条素材没有配图<br>纯文本的灵感照样进库</div>';
+    $('coverNote').textContent = coverNoteText();
+
+    // F5-8：只有所有者能看到换封面的入口
+    var ci = it.cover_index || 0;
+    var rect = rectFor(ci);
+    var acts = [];
+    if (it.cover_thumb) {
+      if (it.cover_source !== 'raw') {
+        acts.push('<button class="btn ghost sm" data-act="cover-raw">用整图（不裁）</button>');
+      }
+      if (rect) {
+        acts.push('<button class="btn ghost sm" data-act="cover-crop">按 AI 矩形重裁</button>');
+      } else {
+        // 没矩形不等于不能裁，只是要多跑一次 AI 去判这张图。
+        // 按钮文案把代价说出来，别让用户以为点一下就完事。
+        acts.push('<button class="btn ghost sm" data-act="cover-crop">让 AI 判这张图的画面区（要等一会儿）</button>');
+      }
+    }
+    $('coverActs').innerHTML = acts.join('') || '<span class="muted">没有可用的封面操作</span>';
+
+    var rows = [];
+    rows.push('封面取第 ' + (ci + 1) + ' 张');
+    rows.push('封面来源 ' + (it.cover_source || '—'));
+    if (rect) {
+      rows.push('这张图的 AI 矩形 ' + rect.left + '/' + rect.top + '/' + rect.right + '/' + rect.bottom + '%');
+    } else if (it.ai_raw && it.ai_raw.rect) {
+      // 有矩形但不在当前这张图上：如实说明它属于哪张，不要拿它冒充当前图的
+      rows.push('AI 矩形是录入时那张图的，换封面后对这张不适用');
+    } else if (it.ai_raw) {
+      rows.push('AI 没给可用矩形');
+    } else {
+      // 旧素材：ai_raw 这一列是后加的，那时候 AI 到底给没给矩形已经查不到了。
+      // 这里不能顺口说「AI 没给」——那是在断言一个我不知道的事实。
+      rows.push('这条早于「记录 AI 原值」上线，矩形没留下来');
+    }
+    $('coverRow').innerHTML = rows.map(function (r) { return '<span>' + esc(r) + '</span>'; }).join('<span>·</span>');
+  }
+
+  function renderShots() {
+    var it = state.item;
+    var ci = it.cover_index || 0;
+    if (!state.imgs.length) {
+      $('shots').innerHTML = '<div class="muted">这条没有图片</div>';
+      $('imgNote').textContent = '';
+      return;
+    }
+    var owner = A.isOwner();
+    $('imgNote').textContent = '共 ' + state.imgs.length + ' 张，点开可放大（F5-7 原件永不被裁掉）';
+    $('shots').innerHTML = state.imgs.map(function (im, i) {
+      var on = i === ci;
+      return '<div class="shot-t' + (on ? ' t-on' : '') + '">'
+        + '<div data-act="zoom" data-i="' + i + '">'
+        + (on ? '<span class="pick">封面</span>' : '')
+        + '<img src="' + S.toDataUrl(im.mime, im.data_base64) + '" alt="" loading="lazy">'
+        + '</div>'
+        + '<div class="lb"><span>第 ' + (i + 1) + ' 张</span><span>' + im.width + '×' + im.height + '</span></div>'
+        // F5-8「重新指定封面」：多图时才需要选，单图时这个按钮没有意义
+        + (owner && state.imgs.length > 1 && !on
+            ? '<button class="linkbtn" style="width:100%;border-radius:0;border-left:0;border-right:0;border-bottom:0;text-align:center" data-act="cover-use" data-i="' + i + '">用这张当封面</button>'
+            : '')
+        + '</div>';
+    }).join('');
+  }
+
+  /* ---------- 渲染：字段区 ---------- */
+
+  function ro(v, cls) {
+    if (v) return '<div class="ro ' + (cls || '') + '">' + esc(v) + '</div>';
+    return '<div class="ro empty ' + (cls || '') + '">（空）</div>';
+  }
+
+  function refLinkHtml() {
+    var it = state.item;
+    var parts = [];
+    if (it.source_url) {
+      parts.push('<a class="linkbtn" href="' + esc(it.source_url) + '" target="_blank" rel="noopener">在原帖打开</a>');
+    }
+    return parts.join(' ');
+  }
+
+  /* ---------- 改动对照（F2-8） ---------- */
+
+  // 比较规则不写在这里，在 diff.js —— 数据页要按同一套规则算「修改率」（A2 的判据），
+  // 两处各写一份迟早会给出两个答案（详情页说改了 3 处、数据页说 2 处）。
+  // 这一页只负责把结果画出来。
+  function diffHtml(it) {
+    var head = '<h2>改动对照 <span class="muted">AI 原值 → 现在</span></h2>';
+
+    if (!it.ai_raw) {
+      // 旧素材：ai_raw 是 v7 才加的列。这里要如实说是「没留下来」，
+      // 不能写成「没改过」——那是在断言一个我不知道的事实。
+      return '<div class="panel">' + head
+        + '<div class="muted">这条早于「记录 AI 原值」上线，AI 当时给的是什么没留下来，'
+        + '所以算不出差异。新收的素材都会有。</div></div>';
+    }
+
+    var rows = D.changed(it);
+    if (!rows.length) {
+      return '<div class="panel">' + head
+        + '<div class="muted">和 AI 给的一模一样，一处没改。</div></div>';
+    }
+
+    var h = ['<div class="panel">' + head, '<div class="difflist">'];
+    rows.forEach(function (r) {
+      h.push('<div class="diffrow"><b>' + esc(r.label) + '</b>'
+        + '<span class="was">' + esc(r.before || '（空）') + '</span>'
+        + '<span class="arrow">→</span>'
+        + '<span class="now">' + esc(r.after || '（空）') + '</span>'
+        + '</div>');
+    });
+    h.push('</div>');
+    h.push('<div class="muted" style="margin-top:10px">「原值」来自 AI 最近一次成功识别的快照，'
+      + '改动永远不会覆盖它，所以这一列永远是真的。</div>');
+    h.push('</div>');
+    return h.join('');
+  }
+
+  function renderFields() {
+    var it = state.item;
+    var owner = A.isOwner();
+    var ai = it.ai_raw || {};
+    var h = [];
+
+    /* 项目名称（卡片的显示名，所以放在最上面） */
+    h.push('<div class="panel"><h2>项目名称 <span class="muted">卡片上显示的就是这个</span></h2>');
+    h.push(owner
+      ? '<input class="inp" id="fTitle" value="' + esc(it.ai_title || '') + '" maxlength="20" placeholder="案例或项目名，比如「纽约高线公园」">'
+      : (it.ai_title ? ro(it.ai_title) : '<div class="ro empty">未命名</div>'));
+    if (owner) {
+      h.push('<div class="muted" style="margin-top:6px">'
+        + (it.ai_title ? '改了要跟下面一起点保存。' : 'AI 没判出名字，可以直接填。')
+        + '</div>');
+    }
+    h.push('</div>');
+
+    /* 摘要 */
+    h.push('<div class="panel"><h2>摘要</h2>');
+    h.push(owner
+      ? '<input class="inp" id="fSummary" value="' + esc(it.ai_summary || '') + '" placeholder="一句话摘要">'
+      : ro(it.ai_summary));
+    h.push('</div>');
+
+    /* 抽屉（F5-2：改了立即保存） */
+    h.push('<div class="panel"><h2>抽屉 <span class="muted">封闭集合，改了立即保存</span></h2>');
+    h.push('<div class="chips" id="catChips">'
+      + state.taxonomy.categories.map(function (c) {
+          return tagChip(c.name, c.name === it.category, {
+            clickable: owner,
+            aiguess: owner && ai.category === c.name && ai.category !== it.category,
+            attrs: 'data-cat="' + esc(c.name) + '"'
+          });
+        }).join('')
+      + '</div>');
+    if (ai.category && ai.category !== it.category) {
+      h.push('<div class="aiguessline">AI 原本判的是「' + esc(ai.category) + '」'
+        + (ai.categoryOutOfList ? '（原话「' + esc(ai.categoryOutOfList) + '」不在清单里，已落兜底）' : '')
+        + '，现在是「' + esc(it.category || '未归类') + '」。</div>');
+    } else if (ai.category) {
+      h.push('<div class="muted" style="margin-top:8px">沿用 AI 的判断，没改过。</div>');
+    }
+    h.push('</div>');
+
+    /* 标签（F5-2：增删立即保存） */
+    h.push('<div class="panel"><h2>标签 <span class="muted">AI 打的标虚线框，我加的实线</span></h2>');
+    h.push('<div class="chips" id="tagChips">');
+    var aiTags = it.ai_tags || [], myTags = it.my_tags || [];
+    if (!aiTags.length && !myTags.length) {
+      h.push('<span class="muted">还没有标签</span>');
+    }
+    aiTags.forEach(function (t) {
+      h.push(tagChip(t, false, {
+        aiguess: true, rm: owner ? 'ai' : ''
+      }));
+    });
+    myTags.forEach(function (t) {
+      h.push(tagChip(t, false, { rm: owner ? 'my' : '' }));
+    });
+    if (owner) h.push('<input class="tagadd" id="tagAdd" data-act="addtag" placeholder="+ 加标签" maxlength="12">');
+    h.push('</div>');
+    if (aiTags.length) {
+      h.push('<div class="aiguessline">虚线框的 ' + aiTags.length + ' 个是 AI 打的；把 AI 的标签点掉就表示我不同意它。</div>');
+    }
+    h.push('</div>');
+
+    /* 来源（F5-6） */
+    h.push('<div class="panel"><h2>来源 <span class="muted">平台不对可以直接改</span></h2>');
+    var cur = it.source_platform || '';
+    var inList = cfg.platforms.indexOf(cur) >= 0;
+    h.push('<div class="chips" id="platChips">'
+      + cfg.platforms.map(function (p) {
+          var on = (p === cur) || (p === '其他' && cur && !inList);
+          return tagChip(p, on, {
+            clickable: owner,
+            aiguess: owner && ai.platform === p && ai.platform !== cur,
+            attrs: 'data-plat="' + esc(p) + '"'
+          });
+        }).join('')
+      + '</div>');
+    if (owner && (((cur === '其他') || (cur && !inList)))) {
+      h.push('<input class="inp" id="platFree" style="margin-top:10px" maxlength="20" '
+        + 'placeholder="来源名，比如「有方」「建筑学报」" value="' + esc(inList ? '' : cur) + '">'
+        + '<div class="muted" style="margin-top:6px">填了名字按回车保存。</div>');
+    } else if (!owner && cur && !inList) {
+      h.push('<div class="muted" style="margin-top:8px">来源名：' + esc(cur) + '</div>');
+    }
+    if (ai.platform && ai.platform !== cur) {
+      h.push('<div class="aiguessline">AI 原本猜的是「' + esc(ai.platform) + '」（黄色虚线框那个），现在是「'
+        + esc(cur || '未填') + '」。</div>');
+    } else if (ai.platform) {
+      h.push('<div class="muted" style="margin-top:8px">沿用 AI 的判断，没改过。</div>');
+    }
+
+    h.push('<label class="fl">来源链接</label>');
+    if (owner) {
+      h.push('<input class="inp" id="fUrl" value="' + esc(it.source_url || '') + '" placeholder="原文网址">');
+    } else {
+      h.push(ro(it.source_url, 'small'));
+    }
+    h.push('<div class="covacts">' + (refLinkHtml() || '<span class="muted">没有链接</span>') + '</div>');
+    h.push('</div>');
+
+    /* 我的备注 */
+    h.push('<div class="panel"><h2>我为什么存它</h2>');
+    h.push(owner
+      ? '<input class="inp" id="fNote" value="' + esc(it.my_note || '') + '" placeholder="打算用在哪、想拿走什么">'
+      : ro(it.my_note));
+    h.push('</div>');
+
+    /* AI 读出来的东西 */
+    h.push('<div class="panel"><h2>AI 读出来的 <span class="muted">改过就原文没了，所以另存了一份原值</span></h2>');
+    h.push('<label class="fl">画面描述</label>');
+    h.push(owner ? '<input class="inp" id="fCaption" value="' + esc(it.ai_caption || '') + '">' : ro(it.ai_caption));
+    h.push('<label class="fl">图中文字 <span class="muted">（会被搜索命中）</span></label>');
+    h.push(owner
+      ? '<textarea class="inp" id="fOcr" style="min-height:70px">' + esc(it.ocr_text || '') + '</textarea>'
+      : ro(it.ocr_text, 'small'));
+    if (owner) {
+      h.push('<div class="foot"><span class="hint">这些字段不是改了立刻存，点右边保存。</span>'
+        + '<button class="btn sm" data-act="save-fields">保存以上字段</button></div>');
+    }
+    h.push('</div>');
+
+    /* 原文 */
+    h.push('<div class="panel"><h2>原文</h2>');
+    h.push(owner
+      ? '<textarea class="inp" id="fRaw" style="min-height:110px">' + esc(it.raw_text || '') + '</textarea>'
+        + '<div class="foot"><span class="hint">' + (it.raw_text ? it.raw_text.length + ' 字' : '空') + '</span>'
+        + '<button class="btn sm" data-act="save-raw">保存原文</button></div>'
+      : ro(it.raw_text, 'small'));
+    h.push('</div>');
+
+    /* 改动对照（F2-8） */
+    h.push(diffHtml(it));
+
+    /* 时间与状态 */
+    h.push('<div class="panel"><h2>记录</h2>'
+      + '<div class="kv"><b>录入时间</b><span>' + esc(fmtTime(it.created_at, true) || '—') + '</span></div>'
+      + '<div class="kv"><b>最后改动</b><span>' + esc(fmtTime(it.updated_at, true) || '—') + '</span></div>'
+      + '<div class="kv"><b>AI 最近一次</b><span>' + (ai.at ? esc(fmtTime(ai.at, true))
+          + (ai.ms ? '（耗时 ' + (ai.ms / 1000).toFixed(1) + 's）' : '') : '没有记录') + '</span></div>'
+      + '<div class="kv"><b>素材类型</b><span>' + esc(it.source_type || '—') + '</span></div>'
+      + '</div>');
+
+    /* 分享这一条（F6-2） */
+    h.push('<div class="panel owner-only"><h2>分享这一条 <span class="muted">只读链接，只包含这一条</span></h2>'
+      + '<div id="shareOneBox"><div class="shnone">读取中…</div></div></div>');
+
+    /* 危险区（F5-3，仅所有者） */
+    h.push('<div class="panel owner-only"><h2>删除</h2>'
+      + '<div class="muted" style="margin-bottom:10px">删除会连这条的图片一起删掉，删完取不回来。</div>'
+      + '<div class="danger"><div class="row">'
+      + '<button class="btn del sm" data-act="del1">删除这条素材</button>'
+      + '<span class="muted" id="delHint"></span>'
+      + '</div></div></div>');
+
+    $('fields').innerHTML = h.join('');
+    renderShareOne();
+  }
+
+  /* ---------- 分享这一条 ---------- */
+
+  // 与首页同一个形态（/i/令牌，PRD 4.6）。发布时若平台不支持路径转发，
+  // 改这一处为 '?t=' + token 即可，share.html 两种都认。
+  function shareUrl(token) {
+    return location.origin + location.pathname.replace(/[^/]*$/, '') + 'i/' + token;
+  }
+
+  function renderShareOne() {
+    var box = $('shareOneBox');
+    if (!box) return;
+    if (!A.isOwner()) { box.innerHTML = ''; return; }
+    var it = state.item;
+    var tok = (it.share_token || '').trim();
+
+    if (!tok) {
+      box.innerHTML = '<div class="shnone">这条还没有分享出去。生成链接后，拿到链接的人只能看到这一条。</div>'
+        + '<div class="shacts"><button class="linkbtn" data-act="share-on">生成只读链接</button></div>';
+      return;
+    }
+    box.innerHTML = '<div class="shlink">' + esc(shareUrl(tok)) + '</div>'
+      + '<div class="shacts">'
+        + '<button class="linkbtn" data-act="share-copy">复制链接</button>'
+        + '<button class="linkbtn" data-act="share-open">预览访客看到的样子</button>'
+        + '<button class="linkbtn" data-act="share-off">关闭这条的分享</button>'
+      + '</div>'
+      + '<div class="shnone" style="margin-top:8px">关闭后这个链接立即失效。</div>';
+  }
+
+  function copyText(t) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      return navigator.clipboard.writeText(t).then(function () { return true; });
+    }
+    var ta = document.createElement('textarea');
+    ta.value = t; ta.style.position = 'fixed'; ta.style.opacity = '0';
+    document.body.appendChild(ta); ta.select();
+    var ok = false;
+    try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+    document.body.removeChild(ta);
+    return Promise.resolve(ok);
+  }
+
+  function render() {
+    var it = state.item;
+    if (!it) return;
+    $('wrap').style.display = '';
+    var label = (it.ai_title || '').trim();
+    $('hdrNote').textContent = label || ('素材 #' + it.id);
+    $('dCrumb').textContent = '素材 #' + it.id + (label ? ' · ' + label : (it.category ? ' · ' + it.category : ''));
+
+    var st = it.status === 'pending' ? '<span class="spin"></span>AI 识别中'
+      : (it.status === 'failed' ? 'AI 识别没完成 · 可在录入页重跑' : 'AI 已完成');
+    $('dStatus').innerHTML = st;
+
+    renderCover();
+    renderShots();
+    renderFields();
+  }
+
+  /* ---------- 图片放大（F5-1 可放大 / F5-7） ---------- */
+
+  function zoom(i) {
+    var im = state.imgs[i];
+    if (!im) return;
+    $('zoomTitle').textContent = '第 ' + (i + 1) + ' / ' + state.imgs.length + ' 张 · '
+      + im.width + '×' + im.height + ' · ' + kb(im.byte_size);
+    $('zoomBox').innerHTML = '<img src="' + S.toDataUrl(im.mime, im.data_base64) + '" alt="">';
+    $('zoom').classList.add('on');
+  }
+
+  /* ---------- 封面重做（F5-8） ---------- */
+
+  // 把第 coverIndex 张图解码成原件。每张图都从库里的 1600px 原件重解，
+  // 不复用内存缓存：详情页可能刚被刷新过，且重裁要的是原件的真实像素尺寸。
+  function rawOf(coverIndex) {
+    var im = state.imgs[coverIndex];
+    if (!im) return Promise.reject(new Error('这张图读不到'));
+    return fetch(S.toDataUrl(im.mime, im.data_base64))
+      .then(function (r) { return r.blob(); })
+      .then(IMG.processRaw);
+  }
+
+  // 要重裁，先得有矩形。没有就现场判一次，并把结果按图存下来——
+  // 存下来这件事是关键：第二次点「重裁」就不用再等 AI 了。
+  function ensureRect(coverIndex) {
+    var have = rectFor(coverIndex);
+    if (have) return Promise.resolve({ rect: have, fresh: false });
+
+    var im = state.imgs[coverIndex];
+    if (!im) return Promise.reject(new Error('这张图读不到，判不了矩形'));
+
+    toast('正在让 AI 判第 ' + (coverIndex + 1) + ' 张图的画面区，可能要等十几秒…');
+    return rawOf(coverIndex)
+      .then(IMG.makeAiInput)
+      .then(function (aiImage) {
+        return AI.detectRect({ aiImage: aiImage });
+      })
+      .then(function (r) {
+        if (!r.rect) {
+          // AI 认为整张图就是画面（或矩形不可信）。这是有效结论，不是失败，
+          // 所以不写库、也不再重裁，如实告诉用户「这张不用裁」。
+          return { rect: null, fresh: true };
+        }
+        return S.setImageRect(state.item.id, im.seq, r.rect)
+          .then(function () {
+            im.ai_rect = r.rect;      // 本地同步，免得再读一次库
+            return { rect: r.rect, fresh: true };
+          });
+      });
+  }
+
+  // reason 是给埋点 E13 用的动作来源：换封面图 / 改回整图 / 重裁。
+  // 三者都归「手动换封面」，但排查「封面裁得准不准」时它们的含义完全不同。
+  function reloadThumb(coverIndex, mode, reason) {
+    var im = state.imgs[coverIndex];
+    if (!im) { toast('这张图读不到，无法重做封面'); return Promise.resolve(); }
+
+    var rectJob = mode === 'crop'
+      ? ensureRect(coverIndex)
+      : Promise.resolve({ rect: null, fresh: false });
+
+    return rectJob.then(function (rr) {
+      if (mode === 'crop' && !rr.rect) {
+        toast('AI 认为这张图整张都是画面，没有可裁的地方');
+        return null;
+      }
+      return rawOf(coverIndex)
+        .then(function (raw) { return IMG.makeCover(raw, mode === 'crop' ? rr.rect : null); })
+        .then(function (c) {
+          return save({
+            cover_thumb: c.thumb.base64,
+            cover_source: c.coverSource,
+            cover_index: coverIndex
+          }, c.coverSource === 'crop' ? '已按 AI 矩形重裁封面' : '封面已改用整图')
+            .then(function () {
+              // E13：手动换封面。记动作来源与「矩形是不是刚判的」——
+              // 「AI 判过、用户又换了一次」说明裁得不准；「AI 从没判过」说明没走过 AI。
+              // 两者要修的东西完全不同。
+              T.event('cover_replaced', {
+                item_id: state.item.id,
+                reason: reason || 'unknown',
+                mode: mode,
+                seq: coverIndex,
+                rect_fresh: !!rr.fresh,
+                ai_rect: rr.rect || null
+              });
+              return c;
+            });
+        });
+    });
+  }
+
+  /* ---------- 交互 ---------- */
+
+  // 统一挂在 document 上做事件委托：可点的东西散在封面区、图片条、字段区三块，
+  // 各挂各的监听很容易漏（原来就把封面按钮漏在 #fields 之外了）。
+  document.addEventListener('click', function (e) {
+    // 遮罩关闭
+    if (e.target.hasAttribute && e.target.hasAttribute('data-close')) { $('zoom').classList.remove('on'); return; }
+    if (e.target.id === 'zoom') { $('zoom').classList.remove('on'); return; }
+
+    // 放大原图
+    var z = e.target.closest('[data-act="zoom"]');
+    if (z) { zoom(Number(z.getAttribute('data-i'))); return; }
+
+    var it = state.item;
+    var t = e.target;
+
+    var rm = t.closest('[data-act="rmtag"]');
+    if (rm) {
+      var tag = rm.getAttribute('data-tag');
+      var key = rm.getAttribute('data-from') === 'my' ? 'my_tags' : 'ai_tags';
+      var patch = {};
+      patch[key] = (it[key] || []).filter(function (x) { return x !== tag; });
+      save(patch, key === 'ai_tags' ? '已去掉 AI 的「' + tag + '」' : '已删除标签「' + tag + '」');
+      return;
+    }
+
+    var cat = t.closest('[data-cat]');
+    if (cat && A.isOwner()) {
+      var name = cat.getAttribute('data-cat');
+      if (name === it.category) return;
+      save({ category: name }, '抽屉已改为「' + name + '」');
+      return;
+    }
+
+    var plat = t.closest('[data-plat]');
+    if (plat && A.isOwner()) {
+      var p = plat.getAttribute('data-plat');
+      if (p === it.source_platform) return;
+      save({ source_platform: p }, '来源已改为「' + p + '」');
+      return;
+    }
+
+    var el = t.closest('[data-act]');
+    var act = el && el.getAttribute('data-act');
+    if (act === 'cover-use') {
+      // 换封面图：先按整图铺上（那一刻还不知道该裁哪儿），用户可以再点「重裁」——
+      // 2026-09-20 起重裁对任意一张封面图都可用（原先只在第 1 张时可用，见 rectFor 注释）。
+      reloadThumb(Number(el.getAttribute('data-i')), 'raw', 'switch');
+      return;
+    }
+    if (act === 'save-fields') { saveFields(); return; }
+    if (act === 'share-on') {
+      save({ share_token: S.newShareToken() }, '已生成只读链接');
+      return;
+    }
+    if (act === 'share-off') {
+      save({ share_token: null }, '已关闭这条的分享，原链接失效');
+      return;
+    }
+    if (act === 'share-copy') {
+      var u1 = $('shareOneBox').querySelector('.shlink').textContent;
+      copyText(u1).then(function (ok) { toast(ok ? '链接已复制' : '复制失败，请手动选中链接复制'); });
+      return;
+    }
+    if (act === 'share-open') {
+      var u2 = $('shareOneBox').querySelector('.shlink').textContent;
+      window.open(u2, '_blank', 'noopener');
+      return;
+    }
+    if (act === 'save-raw') { save({ raw_text: ($('fRaw').value.trim() || null) }, '原文已保存'); return; }
+    if (act === 'cover-raw') { reloadThumb(state.item.cover_index || 0, 'raw', 'uncrop'); return; }
+    // 重裁的对象是**当前封面那张图**，不再是写死的第 1 张
+    if (act === 'cover-crop') { reloadThumb(state.item.cover_index || 0, 'crop', 'recrop'); return; }
+    if (act === 'del1') { confirmDelete(); return; }
+    if (act === 'del2') { doDelete(); return; }
+    if (act === 'delCancel') { resetDelete(); return; }
+  });
+
+  $('fields').addEventListener('keydown', function (e) {
+    var t = e.target;
+    if (t.id === 'tagAdd' && e.key === 'Enter') {
+      e.preventDefault();
+      var v = t.value.trim().replace(/^#/, '').slice(0, 12);
+      if (!v) return;
+      var it = state.item;
+      var all = (it.ai_tags || []).concat(it.my_tags || []);
+      if (all.indexOf(v) >= 0) { toast('这个标签已经有了'); return; }
+      t.value = '';
+      save({ my_tags: (it.my_tags || []).concat([v]) }, '已加标签「' + v + '」');
+    }
+    if (t.id === 'platFree' && e.key === 'Enter') {
+      e.preventDefault();
+      var name = t.value.trim().slice(0, 20);
+      if (!name) return;
+      if (cfg.platforms.indexOf(name) >= 0) { save({ source_platform: name }, '来源已改为「' + name + '」'); return; }
+      save({ source_platform: name }, '来源已改为「' + name + '」');
+    }
+  });
+
+  function saveFields() {
+    var patch = {
+      ai_title: ($('fTitle').value.trim() || ''),
+      ai_summary: ($('fSummary').value.trim() || null),
+      ai_caption: ($('fCaption').value.trim() || null),
+      ocr_text: ($('fOcr').value.trim() || null),
+      my_note: ($('fNote').value.trim() || null),
+      source_url: ($('fUrl').value.trim() || null)
+    };
+    save(patch, '已保存');
+  }
+
+  /* ---------- 删除（F5-3：二次确认） ---------- */
+
+  function confirmDelete() {
+    var row = document.querySelector('.danger .row');
+    row.innerHTML = '<span class="muted">确认删除第 ' + state.item.id + ' 条？连同它的图片一起删，不能恢复。</span>'
+      + '<button class="btn del sm" data-act="del2">确认删除</button>'
+      + '<button class="btn ghost sm" data-act="delCancel">取消</button>';
+  }
+
+  function resetDelete() {
+    var row = document.querySelector('.danger .row');
+    row.innerHTML = '<button class="btn del sm" data-act="del1">删除这条素材</button>'
+      + '<span class="muted" id="delHint"></span>';
+  }
+
+  function doDelete() {
+    var row = document.querySelector('.danger .row');
+    row.innerHTML = '<span class="muted">正在删除…</span>';
+    S.deleteItem(state.item.id).then(function () {
+      location.href = 'index.html?deleted=' + state.item.id;
+    }).catch(function (e) {
+      showErr('删除失败：' + fmtErr(e));
+      resetDelete();
+    });
+  }
+
+  /* ---------- 顶栏与权限变化 ---------- */
+
+  // 解锁或退出后要重画字段区：所有者的输入框与只读视图是两套渲染，
+  // 靠 CSS 隐藏只能藏住元素，藏不住「访客时根本没有的输入框」。
+  window.Elangit.onOwnerChange = function () { if (state.item) render(); };
+  OB.mount();
+
+  /* ---------- 启动 ---------- */
+
+  if (!id) {
+    showErr('网址里没有素材编号（应该形如 item.html?id=12）。返回灵感库点一张卡片进来。');
+  } else {
+    Promise.all([S.loadTaxonomy(), S.fetchItem(id), S.getImages(id)]).then(function (r) {
+      state.taxonomy = r[0];
+      state.item = r[1];
+      state.imgs = r[2];
+      if (!state.item) { showErr('库里没有 #' + id + ' 这条素材，可能已经被删了。'); return; }
+      render();
+      if (/[?&]deleted=/.test(location.search)) toast('已删除');
+    }).catch(function (e) {
+      showErr('读素材失败：' + fmtErr(e));
+    });
+  }
+})();
+</script>
+</body>
+</html>

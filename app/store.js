@@ -1,0 +1,348 @@
+/* ============================================================
+ * Elangit · 数据访问层
+ * ------------------------------------------------------------
+ * 只负责跟云端数据库说话：抽屉/标签库、素材、图片。
+ * 不含任何界面逻辑，也不含 AI 调用（那在 ai.js）。
+ *
+ * 表结构见技术方案 3.1 / 3.2。两个要点：
+ *   1. 图片本体在 item_images，不跟 items 同一行——否则列表页一次
+ *      查 20 条就会顺带拉下几十 MB 的图。
+ *   2. items.cover_thumb 是 400px 缩略图，列表页只取它。
+ * ============================================================ */
+(function (global) {
+  'use strict';
+
+  var cfg = global.Elangit.config;
+  var cloud = global.WorkBuddyCloud.createWorkBuddyCloud({
+    endpoint: cfg.endpoint,
+    publishableKey: cfg.publishableKey
+  });
+
+  // 所有写操作都从这里过一道门（PRD F7-1：未通过口令我方应拒绝一切写操作）。
+  // 放在这一层而不是各个页面里，是为了不漏：将来新增写入口时自动被挡住。
+  function guard() {
+    var auth = global.Elangit.auth;
+    return auth ? auth.requireOwner() : Promise.resolve();
+  }
+
+  var ITEM_COLS = [
+    'id', 'status', 'category', 'ai_title', 'ai_summary', 'ai_caption', 'ocr_text',
+    'ai_tags', 'my_tags', 'raw_text', 'source_platform', 'source_url',
+    'my_note', 'cover_thumb', 'cover_source', 'cover_index',
+    // share_token 也带上：详情页要显示「这条分享出去了没有」，
+    // 少了它就只能另发一次查询（任务 7）
+    'share_token',
+    'source_type', 'created_at', 'updated_at', 'ai_raw'
+  ].join(',');
+
+  function describe(err) {
+    if (!err) return '未知错误';
+    return [err.message, err.details, err.hint, err.code ? 'code=' + err.code : '']
+      .filter(Boolean).join(' | ') || String(err);
+  }
+
+  function unwrap(res, what) {
+    if (res && res.error) throw new Error(what + '失败：' + describe(res.error));
+    return res;
+  }
+
+  /* ---------- 抽屉与标签库（AI 的枚举来源） ---------- */
+
+  var taxonomyCache = null;
+
+  function loadTaxonomy(force) {
+    if (taxonomyCache && !force) return Promise.resolve(taxonomyCache);
+    return Promise.all([
+      cloud.database.from('categories').select('name,is_fallback,sort_order').order('sort_order', { ascending: true }),
+      cloud.database.from('tags').select('name,group_id'),
+      cloud.database.from('tag_groups').select('id,name,color,bg_color,sort_order').order('sort_order', { ascending: true })
+    ]).then(function (r) {
+      unwrap(r[0], '读抽屉');
+      unwrap(r[1], '读标签');
+      unwrap(r[2], '读标签分组');
+      var groups = r[2].data || [];
+      var byId = {};
+      groups.forEach(function (g) { byId[g.id] = g; });
+      // 颜色存在分组上，标签自己不带颜色（PRD Q-E：按用途分组、同组同色）
+      var color = {};
+      (r[1].data || []).forEach(function (t) {
+        var g = byId[t.group_id];
+        if (g) color[t.name] = { c: g.color, bg: g.bg_color, group: g.name };
+      });
+      taxonomyCache = {
+        categories: r[0].data || [],
+        tags: (r[1].data || []).map(function (t) { return t.name; }),
+        groups: groups,
+        tagColor: color
+      };
+      return taxonomyCache;
+    });
+  }
+
+  /* ---------- 素材 ---------- */
+
+  function createItem(row) {
+    return guard().then(function () {
+      return cloud.database.from('items').insert(row).select(ITEM_COLS);
+    })
+      .then(function (r) {
+        unwrap(r, '建素材');
+        var item = r.data && r.data[0];
+        if (!item) throw new Error('建素材失败：数据库没有返回新建的行');
+        return item;
+      });
+  }
+
+  function updateItem(id, patch) {
+    var body = Object.assign({}, patch);
+    body.updated_at = new Date().toISOString();
+    return guard().then(function () {
+      return cloud.database.from('items').update(body).eq('id', id).select(ITEM_COLS);
+    }).then(function (r) {
+      unwrap(r, '更新素材');
+      return r.data && r.data[0];
+    });
+  }
+
+  function fetchItem(id) {
+    return cloud.database.from('items').select(ITEM_COLS).eq('id', id).limit(1)
+      .then(function (r) {
+        unwrap(r, '读素材');
+        return r.data && r.data[0];
+      });
+  }
+
+  function recentItems(limit) {
+    return cloud.database.from('items').select(ITEM_COLS)
+      .order('created_at', { ascending: false }).limit(limit || cfg.recentLimit)
+      .then(function (r) {
+        unwrap(r, '读素材列表');
+        return r.data || [];
+      });
+  }
+
+  function deleteItem(id) {
+    // 先删图片再删主行。实测库里 item_images.item_id 是有 ON DELETE CASCADE 的，
+    // 所以顺序反了也不会留下孤儿图片——这里保留显式顺序是防备那条外键将来被去掉
+    // （删主行成功、删图片失败会更难查，因为前者已经不可逆了）。
+    return guard()
+      .then(function () {
+        return cloud.database.from('item_images').delete().eq('item_id', id).select('id');
+      })
+      .then(function (r) {
+        unwrap(r, '删除素材图片');
+        return cloud.database.from('items').delete().eq('id', id).select('id');
+      })
+      .then(function (r) { unwrap(r, '删除素材'); return true; });
+  }
+
+  /* ---------- 图片 ---------- */
+
+  function addImages(itemId, images) {
+    if (!images.length) return Promise.resolve([]);
+    var rows = images.map(function (img, i) {
+      return {
+        item_id: itemId,
+        seq: typeof img.seq === 'number' ? img.seq : i,
+        mime: img.mime || 'image/jpeg',
+        width: img.width,
+        height: img.height,
+        byte_size: img.byteSize,
+        data_base64: img.base64
+      };
+    });
+    return guard()
+      .then(function () {
+        return cloud.database.from('item_images').insert(rows).select('id,seq');
+      })
+      .then(function (r) { unwrap(r, '存图片'); return r.data || []; });
+  }
+
+  function getImages(itemId) {
+    return cloud.database.from('item_images')
+      .select('seq,mime,width,height,byte_size,data_base64,ai_rect')
+      .eq('item_id', itemId).order('seq', { ascending: true })
+      .then(function (r) { unwrap(r, '读图片'); return r.data || []; });
+  }
+
+  // 把「这一张图被 AI 判过的主体矩形」按图存下来（2026-09-20 新增）。
+  //
+  // 为什么要按图存、而不是只留 items.ai_raw.rect：ai_raw.rect 是「送进模型那张图」
+  // 的矩形，一旦用户在详情页换了封面图，那条记录就对不上新图了。按 seq 存一份，
+  // 「按 AI 矩形重裁」才能对任意一张封面图都成立（F5-8 第三条兜底）。
+  function setImageRect(itemId, seq, rect) {
+    return guard().then(function () {
+      return cloud.database.from('item_images')
+        .update({ ai_rect: rect })
+        .eq('item_id', itemId).eq('seq', seq)
+        .select('id,seq,ai_rect');
+    }).then(function (r) {
+      unwrap(r, '存裁切矩形');
+      var row = (r.data || [])[0];
+      if (!row) throw new Error('存裁切矩形失败：没有匹配到第 ' + seq + ' 张图');
+      return row;
+    });
+  }
+
+  function countImages(itemId) {
+    return cloud.database.from('item_images').select('id').eq('item_id', itemId)
+      .then(function (r) {
+        unwrap(r, '数图片');
+        return (r.data || []).length;
+      });
+  }
+
+  /* ---------- 素材库（浏览与检索用） ---------- */
+
+  // 轻量索引：所有素材的**文本字段 + 分类 + 标签**，刻意不取 cover_thumb。
+  // 一次拉完，之后侧栏计数与关键词检索都在本地做，不再走网络——
+  // 代价是条目很多时这一个请求会变大：按实测单条约 1KB，
+  // 300 条约 300KB 可接受；若将来超过 1MB，就该改成服务端检索（PostgREST 支持
+  // or + ilike + contains + range，已实测可用）。
+  var INDEX_COLS = [
+    'id', 'status', 'category', 'ai_title', 'ai_tags', 'my_tags', 'ai_summary', 'ai_caption',
+    'ocr_text', 'raw_text', 'my_note', 'source_platform', 'source_url',
+    'source_type', 'cover_source', 'cover_index', 'created_at'
+  ].join(',');
+
+  function loadIndex() {
+    return cloud.database.from('items').select(INDEX_COLS)
+      .order('created_at', { ascending: false })
+      .then(function (r) { unwrap(r, '读素材索引'); return r.data || []; });
+  }
+
+  // 卡片只取 400px 缩略图，按 id 批量取——这就是当初把缩略图单独放在
+  // items 上的原因：列表页不会顺带把 1600px 原图拉下来。
+  function cardsByIds(ids) {
+    if (!ids || !ids.length) return Promise.resolve([]);
+    return cloud.database.from('items')
+      .select('id,cover_thumb,cover_source,status,category')
+      .in('id', ids)
+      .then(function (r) { unwrap(r, '读卡片缩略图'); return r.data || []; });
+  }
+
+  /* ---------- 分享（任务 7 / F6） ---------- */
+
+  // settings 是单条记录（id 恒为 1）。**读不加门禁**：分享页要先读它才能判断
+  // 令牌是否有效，而分享页的读者就是访客。注意它里面没有任何秘密——
+  // 口令哈希从来没进过这张表（见 auth.js 顶部说明）。
+  function getSettings() {
+    return cloud.database.from('settings')
+      .select('share_enabled,share_token')
+      .eq('id', 1).limit(1)
+      .then(function (r) {
+        unwrap(r, '读设置');
+        return (r.data || [])[0] || null;
+      });
+  }
+
+  function updateSettings(patch) {
+    var body = Object.assign({}, patch, { updated_at: new Date().toISOString() });
+    return guard().then(function () {
+      return cloud.database.from('settings').update(body).eq('id', 1).select('share_enabled,share_token');
+    }).then(function (r) {
+      unwrap(r, '更新设置');
+      return (r.data || [])[0] || null;
+    });
+  }
+
+  // 单条分享：按令牌取，**只返回这一条**（F6-2 / A7）。
+  // 用 .eq('share_token', t) 而不是先查全表再过滤——过滤写错一次就会把
+  // 别的素材一起发出去，而查询条件写错只会查不到。
+  function fetchItemByShareToken(token) {
+    if (!token) return Promise.resolve(null);
+    return cloud.database.from('items').select(ITEM_COLS)
+      .eq('share_token', token).limit(1)
+      .then(function (r) {
+        unwrap(r, '读分享素材');
+        return (r.data || [])[0] || null;
+      });
+  }
+
+  /* ---------- 埋点（任务 8 / PRD 第 9 章） ---------- */
+
+  // 只记「不可派生」的事件。判断标准：这件事能不能从库里的**当前状态**算出来？
+  //   E4 改了哪些 AI 字段  -> 能（items.ai_raw 对比现值，就是 F2-8 的差异）
+  //   E11 落进兜底抽屉     -> 能（category 等于兜底抽屉名）
+  //   E12 手动更正来源平台 -> 能（ai_raw.platform 对比 source_platform）
+  // 这类一律不写事件，用时现算——少一处写入就少一处会漂移的副本。
+  // 反之「耗时 / 搜索行为 / 会话」是过程量，状态里留不下痕迹，必须记。
+  function insertEvent(name, props) {
+    return guard().then(function () {
+      return cloud.database.from('events').insert({ name: name, props: props || null }).select('id,at');
+    }).then(function (r) {
+      unwrap(r, '记埋点');
+      return (r.data || [])[0] || null;
+    });
+  }
+
+  function loadEvents(names, sinceIso) {
+    var q = cloud.database.from('events').select('name,at,props');
+    if (names && names.length) q = q.in('name', names);
+    if (sinceIso) q = q.gte('at', sinceIso);
+    return q.order('at', { ascending: false }).limit(2000)
+      .then(function (r) { unwrap(r, '读埋点'); return r.data || []; });
+  }
+
+  // 报表用的素材全量：只取算指标要的列，**不带图片**。
+  // ai_raw 必须带上——F2-8 的差异、E4/E11/E12 的派生全靠它。
+  var REPORT_COLS = [
+    'id', 'category', 'ai_title', 'ai_tags', 'my_tags', 'source_platform',
+    'cover_source', 'cover_index', 'status', 'created_at', 'ai_raw'
+  ].join(',');
+
+  function reportItems() {
+    return cloud.database.from('items').select(REPORT_COLS)
+      .order('created_at', { ascending: true })
+      .then(function (r) { unwrap(r, '读报表数据'); return r.data || []; });
+  }
+
+  /* ---------- 杂项 ---------- */
+
+  // 分享令牌。原来的实现用 Math.random + 时间戳，作为「随手猜一下」的
+  // 门槛够用，但它同时是「拿到链接就能看」的唯一凭据，值得用系统随机源。
+  // crypto.getRandomValues 在非安全上下文里可能缺失，所以留了退路。
+  var TOKEN_CHARS = 'abcdefghijkmnpqrstuvwxyz23456789';   // 去掉易混的 l/o/0/1
+  function newShareToken(len) {
+    len = len || 16;
+    var out = '', i;
+    if (global.crypto && global.crypto.getRandomValues) {
+      var buf = new Uint8Array(len);
+      global.crypto.getRandomValues(buf);
+      for (i = 0; i < len; i++) out += TOKEN_CHARS[buf[i] % TOKEN_CHARS.length];
+      return out;
+    }
+    for (i = 0; i < len; i++) out += TOKEN_CHARS[Math.floor(Math.random() * TOKEN_CHARS.length)];
+    return out + Date.now().toString(36);
+  }
+
+  function toDataUrl(mime, base64) {
+    return 'data:' + (mime || 'image/jpeg') + ';base64,' + base64;
+  }
+
+  global.Elangit = global.Elangit || {};
+  global.Elangit.store = {
+    cloud: cloud,
+    describe: describe,
+    loadTaxonomy: loadTaxonomy,
+    createItem: createItem,
+    updateItem: updateItem,
+    fetchItem: fetchItem,
+    recentItems: recentItems,
+    deleteItem: deleteItem,
+    addImages: addImages,
+    getImages: getImages,
+    setImageRect: setImageRect,
+    countImages: countImages,
+    loadIndex: loadIndex,
+    cardsByIds: cardsByIds,
+    getSettings: getSettings,
+    updateSettings: updateSettings,
+    fetchItemByShareToken: fetchItemByShareToken,
+    insertEvent: insertEvent,
+    loadEvents: loadEvents,
+    reportItems: reportItems,
+    newShareToken: newShareToken,
+    toDataUrl: toDataUrl
+  };
+})(window);

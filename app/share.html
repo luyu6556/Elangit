@@ -1,0 +1,449 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Elangit · 只读分享</title>
+<!-- 分享页不进搜索引擎：它是发给具体某个人看的，不是站点入口 -->
+<meta name="robots" content="noindex,nofollow">
+<script>
+// 分享链接是 /s/令牌 或 /i/令牌 形式（PRD 4.6）。这时浏览器的「目录」是
+// /s/ 而不是应用根目录，页面里所有相对路径都会被解析到 /s/style.css、
+// /s/config.js …… 全部 404，分享页只剩一个空壳（真实踩到过）。
+// 这里在解析任何资源之前把 base 指回应用目录：
+//   /s/令牌        -> /
+//   /app/s/令牌    -> /app/
+//   /app/share.html?t=令牌 -> /app/
+// 于是无论部署在根目录还是子路径、用路径式还是 ?t= 式，资源都能找到。
+(function () {
+  var p = location.pathname, i = p.search(/\/(s|i)\//);
+  var dir = i >= 0 ? p.slice(0, i + 1) : p.replace(/[^/]*$/, '');
+  var b = document.createElement('base');
+  b.href = dir;
+  document.head.appendChild(b);
+})();
+</script>
+<link rel="stylesheet" href="style.css">
+<style>
+  /* 分享页专属样式；布局、卡片、图片条都在 style.css 里跟主站共用 */
+  .dbar{display:flex;align-items:center;gap:12px;margin-bottom:16px;flex-wrap:wrap}
+  .dtitle{font-size:20px;font-weight:500;line-height:1.35;margin-bottom:6px}
+  .dtitle.noname{color:var(--ink-3);font-size:16px}
+  .dmeta{font-size:12.5px;color:var(--ink-3);margin-bottom:16px;line-height:1.7}
+  .dmeta b{font-weight:500;color:var(--ink-2)}
+  .deadbox{text-align:center;padding:90px 20px;color:var(--ink-3)}
+  .deadbox b{display:block;color:var(--ink);font-weight:500;font-size:16px;margin-bottom:8px}
+  .deadbox p{font-size:13px;line-height:1.8}
+</style>
+</head>
+<body>
+
+<header>
+  <!-- 刻意不是链接：访客不该被从分享页引到主站去。
+       主站本身是公开的，但「分享页自己能跳进去」和「访客自己知道网址」
+       是两件事——前者等于我们主动把门指给他看。 -->
+  <span class="logo"><i></i>Elangit</span>
+  <span class="muted" id="hdrNote">加载中…</span>
+  <div class="spacer"></div>
+  <span class="shbar"><span class="shtag" id="shareKind">只读分享</span></span>
+</header>
+
+<main class="narrow" id="mLoading">
+  <div class="emptystate">正在打开…</div>
+</main>
+
+<main class="narrow" id="mDead" style="display:none">
+  <div class="deadbox">
+    <b>这个分享链接已经失效</b>
+    <p>可能是所有者关闭了分享，或者链接不完整（复制的时候被截断过）。<br>想要新的链接，找所有者重新生成一条。</p>
+  </div>
+</main>
+
+<main class="narrow" id="mErr" style="display:none">
+  <div class="errcard" id="errText"></div>
+</main>
+
+<!-- 收藏夹分享：只读列表，可按抽屉与标签浏览（F6-5） -->
+<div class="layout" id="vCollection" style="display:none">
+  <aside>
+    <div class="sec">
+      <h3>抽屉</h3>
+      <div id="navCats"></div>
+    </div>
+    <div class="sec">
+      <h3>标签</h3>
+      <div id="navTags"></div>
+    </div>
+  </aside>
+
+  <main class="list">
+    <div class="bar">
+      <div class="search">
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><circle cx="7" cy="7" r="4.6" stroke="#1C1B19" stroke-width="1.4"/><path d="M10.6 10.6 14 14" stroke="#1C1B19" stroke-width="1.4" stroke-linecap="round"/></svg>
+        <input id="q" type="search" placeholder="搜项目名 / 摘要 / 画面描述 / 图中文字 / 原文 / 标签" autocomplete="off">
+      </div>
+      <div class="spacer"></div>
+      <span class="meta" id="count"></span>
+      <button class="reset" id="reset" style="display:none">清空筛选</button>
+    </div>
+    <div class="errcard" id="listErr" style="display:none"></div>
+    <div class="grid" id="grid"></div>
+    <div class="emptystate" id="empty" style="display:none"></div>
+  </main>
+</div>
+
+<!-- 详情：单条分享直接进这里；收藏夹分享点卡片也进这里（页内展开，不改地址） -->
+<div class="layout" id="vDetail" style="display:none">
+  <main class="list" style="padding-left:20px">
+    <div class="dbar">
+      <button class="btn ghost sm" id="backBtn" style="display:none">← 回到列表</button>
+      <span class="muted">只读浏览，这一页不能修改任何内容</span>
+    </div>
+    <div class="dcols">
+      <div class="col-media">
+        <div class="coverbox" id="dCoverBox"></div>
+        <div class="panel" style="margin-top:14px">
+          <h2>全部原图 <span class="muted" id="dImgNote"></span></h2>
+          <div class="shots" id="dShots"></div>
+        </div>
+      </div>
+      <div class="col-fields" id="dFields"></div>
+    </div>
+  </main>
+</div>
+
+<div class="mask" id="zoom">
+  <div class="shot">
+    <div class="bar">
+      <h3 id="zoomTitle">原图</h3>
+      <button class="btn ghost sm" data-close>关闭</button>
+    </div>
+    <div class="box" id="zoomBox"></div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@tencent-ai/workbuddy-cloud-sdk@dev/lib/index.global.js"></script>
+<script src="config.js"></script>
+<!-- 分享页**刻意不加载 ownerbar.js**：访客看不到任何解锁入口。
+     但 auth.js 要加载——store.js 的写操作都走 auth.requireOwner() 这道门
+     （F7-1），不加载的话 guard() 会直接放行，分享页反而成了更弱的一面。 -->
+<script src="auth.js"></script>
+<script src="cards.js"></script>
+<script src="store.js"></script>
+<script>
+(function () {
+  'use strict';
+  var S = window.Elangit.store, C = window.Elangit.cards;
+  var $ = function (id) { return document.getElementById(id); };
+  var PAGE = 24;
+
+  // 访客要不要看到「我为什么存它」？
+  // 默认**不显示**：那条备注是所有者写给自己的，命名就叫「我为什么存它」，
+  // 没被明确要求公开的东西不主动公开。想做作品集展示时再打开这个开关。
+  var SHOW_NOTE = false;
+
+  var state = {
+    taxonomy: null, index: [], filtered: [], cards: {}, shown: 0,
+    q: '', cat: '全部', tags: [],
+    item: null, canBack: false, fetching: false
+  };
+
+  /* ---------- 视图切换 ---------- */
+
+  function show(name) {
+    $('mLoading').style.display = name === 'loading' ? '' : 'none';
+    $('mDead').style.display = name === 'dead' ? '' : 'none';
+    $('mErr').style.display = name === 'err' ? '' : 'none';
+    $('vCollection').style.display = name === 'collection' ? '' : 'none';
+    $('vDetail').style.display = name === 'detail' ? '' : 'none';
+  }
+
+  function fail(e) {
+    $('errText').textContent = '打不开：' + S.describe(e);
+    show('err');
+  }
+
+  /* ---------- 令牌解析 ---------- */
+
+  // 三种来源都认：/s/令牌、/i/令牌（PRD 4.6 的形态，需要托管方把这两条路径
+  // 转发到本页）、?t=令牌（纯静态托管下的退路）、#令牌（复制粘贴时最容易保留的形态）。
+  // 页面同时兼容三者，所以发布时若发现平台不支持路径转发，改生成链接的地方即可，
+  // 这里一行都不用动。
+  function parseRef() {
+    var path = location.pathname;
+    var m = path.match(/\/([si])\/([A-Za-z0-9_-]{4,64})\/?$/);
+    if (m) return { kind: m[1] === 's' ? 'collection' : 'single', token: m[2] };
+    var t = new URLSearchParams(location.search).get('t');
+    if (t) return { kind: 'auto', token: t.trim() };
+    var h = location.hash.replace(/^#\/?/, '').trim();
+    if (h) return { kind: 'auto', token: h };
+    return null;
+  }
+
+  function collectionOpen(tok) {
+    // 两个条件都要满足：开关是开的 **且** 令牌对得上。
+    // 关闭分享时只置 share_enabled=false 也能立即失效（F6-4）。
+    return S.getSettings().then(function (st) {
+      return !!(st && st.share_enabled && st.share_token && st.share_token === tok);
+    });
+  }
+
+  /* ---------- 启动 ---------- */
+
+  function boot() {
+    var ref = parseRef();
+    if (!ref) { show('dead'); return; }
+
+    S.loadTaxonomy().then(function (tax) {
+      state.taxonomy = tax;
+
+      if (ref.kind === 'collection') {
+        return collectionOpen(ref.token).then(function (ok) { return ok ? openCollection() : show('dead'); });
+      }
+      if (ref.kind === 'single') {
+        return S.fetchItemByShareToken(ref.token).then(function (it) {
+          return it ? renderDetail(it, {}) : show('dead');
+        });
+      }
+      // ?t= / #令牌：不知道是哪种，先当收藏夹试，再当单条试。
+      // 两个命名空间都是随机令牌，撞车概率可忽略。
+      return collectionOpen(ref.token).then(function (ok) {
+        if (ok) return openCollection();
+        return S.fetchItemByShareToken(ref.token).then(function (it) {
+          return it ? renderDetail(it, {}) : show('dead');
+        });
+      });
+    }).catch(fail);
+  }
+
+  /* ---------- 收藏夹视图 ---------- */
+
+  function openCollection() {
+    $('shareKind').textContent = '收藏夹分享';
+    show('collection');
+    return S.loadIndex().then(function (rows) {
+      state.index = rows;
+      applyFilter();
+      $('hdrNote').textContent = rows.length
+        ? '共 ' + rows.length + ' 条素材 · 只读'
+        : '这个收藏夹还没有素材';
+    });
+  }
+
+  function applyFilter() {
+    state.filtered = state.index.filter(function (it) { return C.matches(it, state); });
+    state.shown = Math.min(PAGE, state.filtered.length);
+    $('navCats').innerHTML = C.navCatsHtml(state.taxonomy, state.index, state.cat);
+    $('navTags').innerHTML = C.navTagsHtml(state.taxonomy, state.index, state.tags);
+    renderGrid();
+  }
+
+  function renderGrid() {
+    var page = state.filtered.slice(0, state.shown);
+    $('grid').innerHTML = page.map(function (it) {
+      // readOnly:true → 操作条不再出「看原始截图 / 原文」这两颗主站才有的按钮，
+      // 免得访客以为这里是能用的一整套应用。
+      return C.cardHtml(it, state.cards[it.id] || {}, state.taxonomy, { readOnly: true });
+    }).join('');
+    $('grid').style.display = page.length ? '' : 'none';
+
+    var filtering = !!(state.q || state.tags.length || state.cat !== '全部');
+    if (!page.length) {
+      $('empty').style.display = '';
+      $('empty').innerHTML = C.emptyHtml(state.index.length, filtering, {});
+    } else {
+      $('empty').style.display = 'none';
+    }
+    $('count').textContent = C.countText(page.length, state.filtered.length);
+    $('reset').style.display = filtering ? '' : 'none';
+    ensureCards(page);
+  }
+
+  // 与主站同一套两段取数：索引先出文字，缩略图按需补（技术方案 9.1）
+  function ensureCards(page) {
+    var missing = page.filter(function (it) { return !state.cards[it.id]; }).map(function (it) { return it.id; });
+    if (!missing.length || state.fetching) return;
+    state.fetching = true;
+    var batch = missing.slice(0, 60);
+    S.cardsByIds(batch).then(function (rows) {
+      rows.forEach(function (r) { state.cards[r.id] = r; });
+      batch.forEach(function (id) { if (!state.cards[id]) state.cards[id] = {}; });
+      state.fetching = false;
+      $('grid').innerHTML = state.filtered.slice(0, state.shown).map(function (it) {
+        return C.cardHtml(it, state.cards[it.id] || {}, state.taxonomy, { readOnly: true });
+      }).join('');
+      ensureCards(state.filtered.slice(0, state.shown));
+    }).catch(function (e) {
+      state.fetching = false;
+      $('listErr').style.display = 'block';
+      $('listErr').textContent = '缩略图读不到：' + S.describe(e);
+    });
+  }
+
+  /* ---------- 详情视图 ---------- */
+
+  function ro(text, cls) {
+    return text
+      ? '<div class="ro">' + C.esc(text) + '</div>'
+      : '<div class="ro empty">没有</div>';
+  }
+
+  function detailFieldsHtml(it) {
+    var h = [];
+    var title = (it.ai_title || '').trim();
+    h.push('<div class="dtitle' + (title ? '' : ' noname') + '">' + (title ? C.esc(title) : '未命名素材') + '</div>');
+
+    var meta = [C.esc(it.category || '未归类'), C.esc(C.fmtTime(it.created_at) || '')];
+    if (it.source_platform) meta.push('来源 ' + C.esc(it.source_platform));
+    h.push('<div class="dmeta">' + meta.filter(Boolean).join(' · ') + '</div>');
+
+    h.push('<div class="panel"><h2>摘要</h2>' + ro(it.ai_summary) + '</div>');
+    h.push('<div class="panel"><h2>画面描述</h2>' + ro(it.ai_caption) + '</div>');
+    h.push('<div class="panel"><h2>图中文字</h2>' + ro(it.ocr_text) + '</div>');
+
+    var tags = (it.ai_tags || []).concat(it.my_tags || []);
+    h.push('<div class="panel"><h2>标签</h2>'
+      + (tags.length
+          ? '<div class="chips">' + tags.map(function (t) { return C.tagChip(state.taxonomy, t, {}); }).join('') + '</div>'
+          : '<div class="ro empty">没有</div>')
+      + '</div>');
+
+    if (SHOW_NOTE) h.push('<div class="panel"><h2>我为什么存它</h2>' + ro(it.my_note) + '</div>');
+
+    h.push('<div class="panel"><h2>来源</h2>'
+      + (it.source_url
+          ? '<a class="linkbtn" href="' + C.esc(it.source_url) + '" target="_blank" rel="noopener">在原帖打开</a>'
+          : '<div class="ro empty">没有链接</div>')
+      + '</div>');
+
+    h.push('<div class="panel"><h2>原文</h2>' + ro(it.raw_text) + '</div>');
+    return h.join('');
+  }
+
+  function renderDetail(it, opts) {
+    opts = opts || {};
+    state.item = it;
+    state.canBack = !!opts.fromCollection;
+    $('shareKind').textContent = opts.fromCollection ? '收藏夹分享' : '单条分享';
+    var t = (it.ai_title || '').trim();
+    $('hdrNote').textContent = t || '一条素材';
+    $('backBtn').style.display = state.canBack ? '' : 'none';
+    $('dFields').innerHTML = detailFieldsHtml(it);
+    $('dCoverBox').innerHTML = '<div class="none">正在取图…</div>';
+    $('dShots').innerHTML = '';
+    $('dImgNote').textContent = '';
+    show('detail');
+    window.scrollTo({ top: 0 });
+
+    var ci = it.cover_index || 0;
+    return S.getImages(it.id).then(function (imgs) {
+      state.imgs = imgs;
+      if (!imgs.length) {
+        $('dCoverBox').innerHTML = '<div class="none">这条素材没有配图<br>它的内容以文字为主</div>';
+        return;
+      }
+      var at = Math.min(ci, imgs.length - 1);
+      $('dCoverBox').innerHTML = '<img data-i="' + at + '" src="' + C.toDataUrl(imgs[at].mime, imgs[at].data_base64) + '" alt="">';
+      $('dImgNote').textContent = '共 ' + imgs.length + ' 张，点开可放大（原件永不被裁）';
+      $('dShots').innerHTML = imgs.map(function (im, i) {
+        return '<div class="shot-t' + (i === at ? ' t-on' : '') + '" data-i="' + i + '">'
+          + '<img src="' + C.toDataUrl(im.mime, im.data_base64) + '" alt="" loading="lazy">'
+          + '<span class="lb"><span>第 ' + (i + 1) + ' 张</span><span>' + im.width + '×' + im.height + '</span></span>'
+          + '</div>';
+      }).join('');
+    }).catch(function (e) {
+      $('dCoverBox').innerHTML = '<div class="none">图片没取到：' + C.esc(S.describe(e)) + '</div>';
+    });
+  }
+
+  /* ---------- 放大原图 ---------- */
+
+  function openZoom(i) {
+    var im = state.imgs && state.imgs[i];
+    if (!im) return;
+    $('zoomTitle').textContent = '原图 ' + im.width + '×' + im.height + '（第 ' + (i + 1) + ' 张）';
+    $('zoomBox').innerHTML = '<img src="' + C.toDataUrl(im.mime, im.data_base64) + '" alt="">';
+    $('zoom').classList.add('on');
+  }
+  function closeZoom() { $('zoom').classList.remove('on'); $('zoomBox').innerHTML = ''; }
+
+  /* ---------- 交互 ---------- */
+
+  var qTimer = null;
+  $('q').addEventListener('input', function (e) {
+    var v = e.target.value.trim();
+    clearTimeout(qTimer);
+    qTimer = setTimeout(function () { state.q = v; applyFilter(); }, 90);
+  });
+
+  $('navCats').addEventListener('click', function (e) {
+    var b = e.target.closest('.nav-item');
+    if (!b) return;
+    state.cat = b.getAttribute('data-cat');
+    applyFilter();
+    window.scrollTo({ top: 0 });
+  });
+
+  $('navTags').addEventListener('click', function (e) {
+    var c = e.target.closest('.chip');
+    if (!c) return;
+    var t = c.getAttribute('data-tag');
+    var i = state.tags.indexOf(t);
+    if (i >= 0) state.tags.splice(i, 1); else state.tags.push(t);
+    applyFilter();
+  });
+
+  $('reset').addEventListener('click', clearFilters);
+  function clearFilters() {
+    state.q = ''; state.cat = '全部'; state.tags = [];
+    $('q').value = '';
+    applyFilter();
+  }
+
+  $('backBtn').addEventListener('click', function () {
+    show('collection');
+    window.scrollTo({ top: 0 });
+  });
+
+  document.addEventListener('click', function (e) {
+    if (e.target.closest('[data-close]')) { closeZoom(); return; }
+    if (e.target.classList && e.target.id === 'zoom') { closeZoom(); return; }
+
+    var shot = e.target.closest('.shot-t, .coverbox img');
+    if (shot) { openZoom(Number(shot.getAttribute('data-i')) || 0); return; }
+
+    var resetBtn = e.target.closest('[data-act="reset"]');
+    if (resetBtn) { clearFilters(); return; }
+
+    // 点卡片 → 页内展开详情。**刻意不跳 item.html**：
+    // 那是私有应用的详情页，靠 ?id= 取任何一条素材；把它交给访客，
+    // 等于顺手给了「改个数字看全库」的办法。分享页只在服务端按令牌取数。
+    var card = e.target.closest('.card[data-act]');
+    if (card) {
+      var id = Number(card.getAttribute('data-id'));
+      var it = state.index.filter(function (x) { return x.id === id; })[0];
+      if (it) renderDetail(it, { fromCollection: true });
+      return;
+    }
+  });
+
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape') closeZoom();
+  });
+
+  // 滚到底再补一屏（F3-4）。分享页同样分页，免得一次把几百条缩略图全拉下来。
+  window.addEventListener('scroll', function () {
+    if ($('vCollection').style.display === 'none') return;
+    if (state.shown >= state.filtered.length) return;
+    if (window.innerHeight + window.scrollY < document.body.scrollHeight - 400) return;
+    state.shown = Math.min(state.shown + PAGE, state.filtered.length);
+    renderGrid();
+  });
+
+  boot();
+})();
+</script>
+</body>
+</html>

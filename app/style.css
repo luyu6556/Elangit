@@ -1,0 +1,309 @@
+/* ============================================================
+ * Elangit · 共用样式
+ * ------------------------------------------------------------
+ * 设计变量与界面稿（outputs/05-界面稿.html）完全一致，改配色只改这里。
+ * 只放两个以上页面共用的东西；页面专属样式留在各自 <style> 里。
+ * ============================================================ */
+
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#F7F6F4; --surface:#FFFFFF; --line:#E6E3DE; --line-2:#D8D4CD;
+  --ink:#1C1B19; --ink-2:#5C5951; --ink-3:#918D84;
+  --g1:#2E6FD9; --g1b:#E8F0FD;
+  --g2:#B4652F; --g2b:#FBEEE2;
+  --g3:#6B5AD6; --g3b:#EFEDFC;
+  --g4:#3E7D57; --g4b:#E7F2EB;
+  --g5:#BC4265; --g5b:#FBE9EF;
+  --warn:#854F0B; --warnb:#FAEEDA;
+  --err:#B3261E;
+  --r:10px;
+}
+html,body{height:100%}
+body{
+  background:var(--bg);color:var(--ink);
+  font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  font-size:14px;line-height:1.6;-webkit-font-smoothing:antialiased;
+}
+button{font:inherit;color:inherit;background:none;border:none;cursor:pointer}
+input,textarea,select{font:inherit;color:inherit}
+a{color:inherit;text-decoration:none}
+
+/* ---------- 顶栏 ---------- */
+header{
+  position:sticky;top:0;z-index:30;background:rgba(255,255,255,.92);
+  backdrop-filter:saturate(180%) blur(12px);
+  border-bottom:1px solid var(--line);
+  display:flex;align-items:center;gap:18px;padding:0 20px;height:58px;
+}
+.logo{font-size:16px;font-weight:500;letter-spacing:.02em;display:flex;align-items:center;gap:8px;flex:none}
+.logo i{width:16px;height:16px;border:1.5px solid var(--ink);border-radius:3px;display:block;position:relative}
+.logo i:after{content:"";position:absolute;inset:3px;background:var(--ink);border-radius:1px}
+/* flex:none + nowrap 是必须的：顶栏不换行，窄屏时默认的 flex-shrink 会把
+   「灵感库」压成逐字竖排（实测 <420px 出现，整页还多出横向滚动条）。
+   宁可挤出去也不能把文字拆成竖排。 */
+.hnav{display:flex;gap:2px;flex:none}
+.hnav a{font-size:13.5px;color:var(--ink-2);padding:6px 11px;border-radius:7px;transition:background .12s;white-space:nowrap}
+.hnav a:hover{background:#EFEDE9}
+.hnav a.on{background:var(--ink);color:#fff}
+.spacer{flex:1}
+.muted{font-size:12px;color:var(--ink-3);font-weight:400}
+
+/* ---------- 按钮 ---------- */
+.btn{
+  height:36px;padding:0 16px;border-radius:8px;background:var(--ink);color:#fff;font-weight:500;
+  display:inline-flex;align-items:center;gap:6px;transition:opacity .15s;white-space:nowrap;
+}
+.btn:hover{opacity:.85}
+.btn:disabled{opacity:.4;cursor:default}
+.btn.ghost{background:transparent;color:var(--ink);border:1px solid var(--line-2);font-weight:400}
+.btn.ghost:hover{background:#fff;opacity:1}
+.btn.sm{height:30px;padding:0 11px;font-size:12.5px}
+.linkbtn{
+  font-size:11.5px;line-height:1;color:var(--ink-2);border:1px solid var(--line-2);border-radius:6px;
+  padding:4px 8px;background:#fff;transition:border-color .12s,color .12s;display:inline-block;white-space:nowrap;
+}
+.linkbtn:hover{border-color:var(--ink-3);color:var(--ink)}
+
+/* ---------- 容器 ---------- */
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:18px;margin-bottom:18px}
+.panel > h2{font-size:15px;font-weight:500;margin-bottom:14px;display:flex;align-items:baseline;gap:10px}
+main.narrow{max-width:900px;margin:0 auto;padding:24px 20px 100px}
+
+/* ---------- 表单 ---------- */
+.fl{font-size:12px;color:var(--ink-3);margin:16px 0 6px;display:block}
+.inp{width:100%;border:1px solid var(--line-2);border-radius:8px;padding:9px 11px;outline:none;background:#fff}
+.inp:focus{border-color:var(--ink-3)}
+textarea.inp{resize:vertical;min-height:84px;line-height:1.6}
+.row2{display:flex;gap:14px;flex-wrap:wrap}
+.row2 > div{flex:1;min-width:180px}
+.foot{display:flex;gap:12px;align-items:center;margin-top:18px;padding-top:16px;border-top:1px solid var(--line)}
+.hint{font-size:12px;color:var(--ink-3);flex:1}
+
+/* ---------- 标签 ---------- */
+.chips{display:flex;flex-wrap:wrap;gap:5px;align-items:center}
+.chip{font-size:12px;line-height:1;padding:5px 9px;border-radius:20px;border:1px solid transparent;display:inline-flex;align-items:center;gap:3px}
+.chip.x{cursor:pointer}
+.chip.x:hover{opacity:.78}
+
+/* ---------- 提示 ---------- */
+.warnline{font-size:12px;color:var(--warn);margin-top:8px;line-height:1.6}
+.errcard{background:#FBE9E7;border:1px solid #F0C4C0;color:var(--err);font-size:12.5px;border-radius:8px;padding:10px 12px;margin-bottom:12px}
+#toast{
+  position:fixed;left:50%;bottom:28px;transform:translateX(-50%) translateY(20px);opacity:0;
+  background:var(--ink);color:#fff;font-size:13px;padding:10px 16px;border-radius:8px;z-index:80;
+  transition:.18s;pointer-events:none;max-width:80vw;text-align:center;
+}
+#toast.on{opacity:1;transform:translateX(-50%) translateY(0)}
+.spin{width:10px;height:10px;border:1.5px solid rgba(0,0,0,.18);border-top-color:currentColor;border-radius:50%;animation:sp .7s linear infinite;flex:none}
+@keyframes sp{to{transform:rotate(360deg)}}
+
+/* ---------- 状态徽标 ---------- */
+.st{font-size:11.5px;padding:3px 8px;border-radius:20px;border:1px solid var(--line-2);color:var(--ink-2);display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
+.st.pending{border-color:#BA7517;color:var(--warn);background:var(--warnb)}
+.st.done{border-color:#3E7D57;color:#2C5B3F;background:var(--g4b)}
+.st.failed{border-color:#B3261E;color:var(--err);background:#FBE9E7}
+
+/* ---------- 卡片流 ---------- */
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(228px,1fr));gap:18px}
+.card{
+  background:var(--surface);border:1px solid var(--line);border-radius:var(--r);
+  overflow:hidden;transition:border-color .15s,transform .15s;display:flex;flex-direction:column;
+}
+.card:hover{border-color:var(--line-2);transform:translateY(-2px)}
+.cthumb{aspect-ratio:4/3;background:#EFEDE9;position:relative;overflow:hidden}
+.cthumb img{width:100%;height:100%;object-fit:cover;display:block}
+.cthumb .plat{
+  position:absolute;left:8px;top:8px;font-size:11px;line-height:1;
+  padding:4px 7px;border-radius:5px;background:rgba(255,255,255,.92);color:var(--ink-2);
+}
+.cthumb .stag{position:absolute;right:8px;top:8px}
+.cthumb.notxt{display:flex;align-items:center;justify-content:center;background:#F1EFEB;cursor:default}
+.cthumb.notxt p{font-size:12px;color:var(--ink-3);padding:0 20px;text-align:center;line-height:1.7}
+/* 卡片的信息顺序：抽屉 + 日期（一行）→ 项目名 → 摘要 + 标签 → 操作条。
+   日期从操作条挪到抽屉旁边、项目名占住原来日期的位置，是用户按自己的
+   扫读习惯指定的。操作条挪到最底部不是随意改：项目名放回那一行后会跟
+   两颗按钮抢宽度，228px 的卡片里只够显示 5 个字，等于白放。 */
+.crow-cat{display:flex;align-items:baseline;gap:8px;font-size:12px;color:var(--ink-2);padding:8px 12px 0}
+.crow-cat .sp{flex:1}
+.crow-cat .date{font-size:11.5px;color:var(--ink-3);flex:none;font-variant-numeric:tabular-nums}
+.ctitle{
+  font-size:13.5px;font-weight:500;color:var(--ink);
+  padding:5px 12px 0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+.ctitle.noname{color:var(--ink-3);font-weight:400}
+.cbody{padding:7px 12px 10px;display:flex;flex-direction:column;gap:9px;flex:1}
+.cmrow{
+  display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--ink-3);
+  padding:7px 12px;border-top:1px solid var(--line);background:#FCFBFA;margin-top:auto;
+}
+.cmrow .sp{flex:1}
+.csum{font-size:13px;line-height:1.5;color:var(--ink);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.csum.empty{color:var(--ink-3)}
+.ctags{display:flex;flex-wrap:wrap;gap:4px;margin-top:auto}
+.ctags .chip{padding:4px 7px;font-size:11.5px}
+
+/* 整页空态。**类名刻意不叫 `empty`**：`.ro.empty`（只读字段为空）、`.csum.empty`（摘要为空）、
+   `.sum.empty`（录入页摘要为空）都带有 `empty` 这个类，若这里用 `.empty`，那些小字块会一起继承
+   80px 内边距与居中对齐 —— 空字段会变成一块 200px 高的空白。2026-09-20 实测踩到并改名。 */
+.emptystate{text-align:center;padding:80px 20px;color:var(--ink-3)}
+.emptystate b{display:block;color:var(--ink);font-weight:500;font-size:15px;margin-bottom:6px}
+
+/* ---------- 所有者开关与权限 ---------- */
+
+/* 唯一的权限样式。页面只负责给元素挂 .owner-only，
+   不自己判断「我是不是所有者」——判断散在各页就容易漏（F5-4）。 */
+body:not(.is-owner) .owner-only{display:none !important}
+
+#ownerBar{display:flex;align-items:center;gap:8px;flex:none}
+.own{font-size:11.5px;color:var(--ink-3);border:1px solid var(--line-2);border-radius:20px;padding:3px 9px;white-space:nowrap}
+.own.on{color:#2C5B3F;background:var(--g4b);border-color:#C3DDCC}
+.ownpass{
+  width:150px;height:28px;border:1px solid var(--line-2);border-radius:7px;
+  padding:0 9px;font-size:12.5px;outline:none;background:#fff;
+}
+.ownpass:focus{border-color:var(--ink-3)}
+.ownerr{font-size:11.5px;color:var(--err);white-space:nowrap}
+
+/* ---------- 弹层 ---------- */
+.mask{position:fixed;inset:0;background:rgba(28,27,25,.62);display:none;align-items:center;justify-content:center;z-index:60;padding:24px}
+.mask.on{display:flex}
+.shot{background:var(--surface);border-radius:12px;max-width:min(920px,96vw);max-height:92vh;display:flex;flex-direction:column;overflow:hidden}
+.shot .bar{display:flex;align-items:center;gap:12px;padding:12px 16px;border-bottom:1px solid var(--line)}
+.shot .bar h3{font-size:14px;font-weight:500;flex:1}
+.shot .box{overflow:auto;padding:16px;background:#EFEDE9}
+.shot .box img{max-width:100%;display:block;margin:0 auto;border-radius:6px}
+
+/* ---------- 分享开关（私有两页的 owner-only 区块） ---------- */
+.shlink{
+  font-size:12px;line-height:1.55;background:#F1EFEB;border:1px solid var(--line);
+  border-radius:6px;padding:7px 9px;word-break:break-all;color:var(--ink-2);
+}
+.shacts{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
+.shnone{font-size:12px;color:var(--ink-3);line-height:1.6}
+
+/* ---------- 浏览布局（灵感库 + 分享页共用） ---------- */
+/* 这段原先写在 index.html 的 <style> 里。分享页要用同一套侧栏与栅格布局，
+   两份拷贝一定会漂移——而分享页是给外人看的那一面，最不该长得不一样。 */
+.layout{display:flex;align-items:flex-start;max-width:1440px;margin:0 auto}
+aside{
+  width:224px;flex:none;padding:24px 12px 60px 20px;
+  position:sticky;top:58px;max-height:calc(100vh - 58px);overflow-y:auto;
+}
+aside::-webkit-scrollbar{width:6px}
+aside::-webkit-scrollbar-thumb{background:#DCD8D1;border-radius:3px}
+.sec{margin-bottom:26px}
+.sec > h3{font-size:11px;font-weight:500;color:var(--ink-3);letter-spacing:.08em;margin:0 0 8px 8px}
+.nav-item{
+  display:flex;align-items:center;gap:8px;width:100%;text-align:left;
+  padding:7px 8px;border-radius:7px;color:var(--ink-2);transition:background .12s;
+}
+.nav-item:hover{background:#EFEDE9}
+.nav-item.on{background:var(--ink);color:#fff}
+.nav-item .n{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.nav-item .c{font-size:12px;color:var(--ink-3);font-variant-numeric:tabular-nums}
+.nav-item.on .c{color:rgba(255,255,255,.6)}
+.taggroup{margin-bottom:14px}
+.taggroup h4{font-size:11.5px;font-weight:500;margin:0 0 6px 8px;display:flex;align-items:center;gap:6px;color:var(--ink-2)}
+.taggroup h4 i{width:7px;height:7px;border-radius:2px;display:block;flex:none}
+.taggroup .chips{padding-left:8px}
+.taggroup .chip{cursor:pointer}
+.taggroup .chip.on{outline:1.5px solid currentColor;outline-offset:-1.5px}
+.taggroup .chip .c{opacity:.62;font-variant-numeric:tabular-nums}
+
+main.list{flex:1;min-width:0;padding:24px 20px 80px 8px}
+.bar{display:flex;align-items:center;gap:12px;margin-bottom:16px;min-height:32px;flex-wrap:wrap}
+.bar .meta{font-size:13px;color:var(--ink-3)}
+.reset{font-size:13px;color:var(--ink-2);text-decoration:underline;text-underline-offset:3px}
+.search{flex:1;max-width:420px;position:relative}
+.search input{
+  width:100%;height:36px;border:1px solid var(--line-2);border-radius:8px;
+  background:var(--surface);padding:0 12px 0 34px;outline:none;transition:border-color .15s;
+}
+.search input:focus{border-color:var(--ink-3)}
+.search svg{position:absolute;left:11px;top:10px;opacity:.45}
+.cbadge{font-size:11.5px;color:var(--ink-3);padding:0 12px 2px}
+.card[data-act]{cursor:pointer}
+
+/* 分享页顶栏的「只读」标记 */
+.shbar{display:flex;align-items:center;gap:8px;flex:none}
+.shtag{
+  font-size:11.5px;color:var(--ink-2);border:1px solid var(--line-2);
+  border-radius:20px;padding:3px 9px;white-space:nowrap;
+}
+
+/* ---------- 素材展示（详情页 + 分享页共用） ---------- */
+/* 这几条原先在 item.html 的 <style> 里。分享页也要展示封面、原图条与只读字段，
+   复制一份的话「封面限高多少、原图缩略图多高」两边会各调各的。 */
+.dcols{display:flex;gap:20px;align-items:flex-start}
+.col-media{width:440px;flex:none}
+/* 左栏跟随滚动只在窗口够高时才开，并且**自带高度上限与内部滚动**。
+   起因：竖版封面（裁切后 709×860）在 440px 宽的栏里高约 530px，加上面板标题
+   就把换封面的按钮顶到了 679px 处；而 position:sticky 会把整栏钉在 top:74，
+   于是**不管怎么往下滚，按钮都停在视口之外**——实测 577px 高的窗口下
+   那两颗按钮完全点不到。
+   光靠「窗口够高才钉」是估算，内容一变（多几张图、描述变长）又会失效。
+   所以加上 max-height + overflow-y：栏高永远不超过视口，装不下就在栏内滚。
+   这样可达性是由结构保证的，不靠估。 */
+@media (min-height:900px){
+  .col-media{position:sticky;top:74px;max-height:calc(100vh - 92px);overflow-y:auto}
+  .col-media::-webkit-scrollbar{width:6px}
+  .col-media::-webkit-scrollbar-thumb{background:#DCD8D1;border-radius:3px}
+}
+.col-fields{flex:1;min-width:0}
+
+.coverbox{background:#EFEDE9;border-radius:8px;overflow:hidden;display:flex;align-items:center;justify-content:center;min-height:120px}
+.coverbox img{max-width:100%;max-height:44vh;width:auto;display:block;margin:0 auto;cursor:zoom-in}
+.coverbox .none{padding:40px 20px;text-align:center;color:var(--ink-3);font-size:12.5px;line-height:1.7}
+
+.shots{display:grid;grid-template-columns:repeat(auto-fill,minmax(88px,1fr));gap:8px}
+.shot-t{position:relative;border:1px solid var(--line);border-radius:7px;overflow:hidden;background:#fff;cursor:zoom-in}
+.shot-t.t-on{border-color:var(--ink);box-shadow:0 0 0 1px var(--ink) inset}
+.shot-t img{width:100%;height:72px;object-fit:cover;display:block}
+.shot-t .lb{font-size:10.5px;color:var(--ink-3);padding:3px 5px;background:#FCFBFA;border-top:1px solid var(--line);display:flex;justify-content:space-between;gap:4px}
+.shot-t .pick{font-size:10.5px;line-height:1;position:absolute;left:4px;top:4px;background:var(--ink);color:#fff;border-radius:4px;padding:3px 5px}
+
+.ro{font-size:13.5px;line-height:1.65;white-space:pre-wrap;word-break:break-word;color:var(--ink)}
+.ro.empty{color:var(--ink-3);font-size:12.5px}
+
+/* ---------- 改动对照（F2-8） ---------- */
+/* 一行一条差异：「AI 原值 → 现在的值」。原值用灰底划线，现值用实色，
+   一眼能看出改了什么、从什么改成什么。 */
+.difflist{border-top:1px solid var(--line)}
+.diffrow{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;padding:9px 0;border-bottom:1px solid var(--line);font-size:13px;line-height:1.55}
+.diffrow b{flex:none;width:104px;font-weight:500;color:var(--ink-2);font-size:12.5px}
+.diffrow .was{color:var(--ink-3);text-decoration:line-through;background:#F4F2EE;border-radius:4px;padding:2px 7px;max-width:44%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.diffrow .arrow{color:var(--ink-3);flex:none}
+.diffrow .now{color:var(--ink);background:#F1EFEB;border-radius:4px;padding:2px 7px;max-width:48%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+@media (max-width:980px){
+  .dcols{flex-direction:column}
+  .col-media{width:100%;position:static}
+}
+
+@media (max-width:800px){
+  .layout{flex-direction:column}
+  aside{width:100%;position:static;max-height:none;padding:16px 12px 0}
+  main.list{padding:12px 12px 80px}
+  .taggroup .chips{flex-wrap:nowrap;overflow-x:auto;padding-bottom:4px}
+}
+
+@media (max-width:640px){
+  main.narrow{padding:16px 12px 90px}
+  .grid{grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px}
+}
+
+/* ---------- 顶栏在窄屏 ---------- */
+/* 顶栏是不换行的 flex。窄屏放不下这么多子项时，先丢副标题、再缩字号，
+   顺序是从「最不重要的」开始丢。用 header > .muted 而不是给某个 id/class
+   打补丁：三个页面的副标题写法不完全一样，按位置选更稳。 */
+@media (max-width:760px){
+  header{gap:12px;padding:0 14px}
+  header > .muted{display:none}
+}
+@media (max-width:460px){
+  header{gap:8px;padding:0 10px}
+  header .logo{font-size:0;gap:0}
+  header .hnav a{padding:6px 8px;font-size:13px}
+  header .btn{height:32px;padding:0 12px}
+  header .own{padding:3px 7px}
+}

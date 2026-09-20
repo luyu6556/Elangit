@@ -1,0 +1,620 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-page-node-id="51MtB6RfWRiITOLBDNwuNg">
+<head data-page-node-id="7EWued2TOILHhfaP3MOXJE">
+<meta charset="utf-8" data-page-node-id="q1OYAiTtHnMUEklcFRtwwF">
+<meta name="viewport" content="width=device-width, initial-scale=1" data-page-node-id="oEzyU1XUF9XwzCfzOyDDUF">
+<title>Elangit · 界面稿（可点击原型）</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  :root{
+    --bg:#F7F6F4; --surface:#FFFFFF; --line:#E6E3DE; --line-2:#D8D4CD;
+    --ink:#1C1B19; --ink-2:#5C5951; --ink-3:#918D84;
+    --accent:#1C1B19;
+    --g1:#2E6FD9; --g1b:#E8F0FD;
+    --g2:#B4652F; --g2b:#FBEEE2;
+    --g3:#6B5AD6; --g3b:#EFEDFC;
+    --g4:#3E7D57; --g4b:#E7F2EB;
+    --g5:#BC4265; --g5b:#FBE9EF;
+    --r:10px;
+  }
+  html,body{height:100%}
+  body{
+    background:var(--bg);color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+    font-size:14px;line-height:1.6;-webkit-font-smoothing:antialiased;
+  }
+  button{font:inherit;color:inherit;background:none;border:none;cursor:pointer}
+  input,textarea{font:inherit;color:inherit}
+
+  /* 界面稿提示条 */
+  .ribbon{background:#1C1B19;color:#F2F0EC;font-size:12px;padding:7px 20px;display:flex;gap:10px;align-items:center}
+  .ribbon b{font-weight:500;color:#fff}
+  .ribbon span{color:#A9A49B}
+
+  /* 顶栏 */
+  header{
+    position:sticky;top:0;z-index:30;background:rgba(255,255,255,.92);
+    backdrop-filter:saturate(180%) blur(12px);
+    border-bottom:1px solid var(--line);
+    display:flex;align-items:center;gap:20px;padding:0 20px;height:58px;
+  }
+  .logo{font-size:16px;font-weight:500;letter-spacing:.02em;display:flex;align-items:center;gap:8px}
+  .logo i{width:16px;height:16px;border:1.5px solid var(--ink);border-radius:3px;display:block;position:relative}
+  .logo i:after{content:"";position:absolute;inset:3px;background:var(--ink);border-radius:1px}
+  .search{flex:1;max-width:420px;position:relative}
+  .search input{
+    width:100%;height:36px;border:1px solid var(--line-2);border-radius:8px;
+    background:var(--surface);padding:0 12px 0 34px;outline:none;transition:border-color .15s;
+  }
+  .search input:focus{border-color:var(--ink-3)}
+  .search svg{position:absolute;left:11px;top:10px;opacity:.45}
+  .spacer{flex:1}
+  .btn{
+    height:36px;padding:0 16px;border-radius:8px;background:var(--accent);color:#fff;
+    font-weight:500;display:inline-flex;align-items:center;gap:6px;transition:opacity .15s;
+  }
+  .btn:hover{opacity:.85}
+  .btn.ghost{background:transparent;color:var(--ink);border:1px solid var(--line-2);font-weight:400}
+  .btn.ghost:hover{background:#fff;opacity:1}
+  .btn.sm{height:30px;padding:0 12px;font-size:13px}
+
+  /* 布局 */
+  .layout{display:flex;align-items:flex-start;gap:0;max-width:1440px;margin:0 auto}
+  aside{
+    width:224px;flex:none;padding:24px 12px 60px 20px;
+    position:sticky;top:58px;max-height:calc(100vh - 58px);overflow-y:auto;
+  }
+  aside::-webkit-scrollbar{width:6px}
+  aside::-webkit-scrollbar-thumb{background:#DCD8D1;border-radius:3px}
+  .sec{margin-bottom:26px}
+  .sec > h3{
+    font-size:11px;font-weight:500;color:var(--ink-3);letter-spacing:.08em;
+    margin:0 0 8px 8px;text-transform:uppercase;
+  }
+  .nav-item{
+    display:flex;align-items:center;gap:8px;width:100%;text-align:left;
+    padding:7px 8px;border-radius:7px;color:var(--ink-2);transition:background .12s;
+  }
+  .nav-item:hover{background:#EFEDE9}
+  .nav-item.on{background:#1C1B19;color:#fff}
+  .nav-item .n{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .nav-item .c{font-size:12px;color:var(--ink-3);font-variant-numeric:tabular-nums}
+  .nav-item.on .c{color:rgba(255,255,255,.6)}
+  .nav-item .dot{width:7px;height:7px;border-radius:50%;flex:none}
+
+  .taggroup{margin-bottom:14px}
+  .taggroup h4{font-size:11.5px;font-weight:500;margin:0 0 6px 8px;display:flex;align-items:center;gap:6px}
+  .taggroup h4 i{width:7px;height:7px;border-radius:2px;display:block}
+  .chips{display:flex;flex-wrap:wrap;gap:5px;padding-left:8px}
+  .chip{
+    font-size:12px;line-height:1;padding:5px 9px;border-radius:20px;
+    border:1px solid transparent;transition:opacity .12s;
+  }
+  .chip:hover{opacity:.75}
+  .chip.on{outline:1.5px solid currentColor;outline-offset:-1.5px}
+
+  /* 主区 */
+  main{flex:1;min-width:0;padding:24px 20px 80px 8px}
+  .bar{display:flex;align-items:center;gap:12px;margin-bottom:16px;min-height:32px}
+  .bar h2{font-size:17px;font-weight:500}
+  .bar .meta{font-size:13px;color:var(--ink-3)}
+  .reset{font-size:13px;color:var(--ink-2);text-decoration:underline;text-underline-offset:3px}
+
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(228px,1fr));gap:18px}
+  .card{
+    background:var(--surface);border:1px solid var(--line);border-radius:var(--r);
+    overflow:hidden;cursor:pointer;transition:border-color .15s,transform .15s;
+    display:flex;flex-direction:column;
+  }
+  .card:hover{border-color:var(--line-2);transform:translateY(-2px)}
+  .thumb{aspect-ratio:4/3;background:#EFEDE9;display:block;position:relative;overflow:hidden}
+  .thumb svg{width:100%;height:100%;display:block}
+  .thumb img{width:100%;height:100%;object-fit:cover;display:block}
+  .thumb .plat{
+    position:absolute;left:8px;top:8px;font-size:11px;line-height:1;
+    padding:4px 7px;border-radius:5px;background:rgba(255,255,255,.92);color:var(--ink-2);
+  }
+  .thumb.notxt{display:flex;align-items:center;justify-content:center;background:#F1EFEB}
+  .thumb.notxt p{font-size:12px;color:var(--ink-3);padding:0 20px;text-align:center;line-height:1.7}
+  .cmrow{display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--ink-3);padding:7px 12px;border-bottom:1px solid var(--line);background:#FCFBFA}
+  .cmrow .sp{flex:1}
+  .linkbtn{font-size:11.5px;line-height:1;color:var(--ink-2);border:1px solid var(--line-2);border-radius:6px;padding:4px 8px;background:#fff;transition:border-color .12s,color .12s;text-decoration:none;display:inline-block}
+  .linkbtn:hover{border-color:var(--ink-3);color:var(--ink)}
+  .cbody{padding:11px 12px 12px;display:flex;flex-direction:column;gap:9px;flex:1}
+  .csum{font-size:13px;line-height:1.5;color:var(--ink);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+  .ctags{display:flex;flex-wrap:wrap;gap:4px;margin-top:auto}
+  .ctags .chip{padding:4px 7px;font-size:11.5px}
+
+  .empty{text-align:center;padding:80px 20px;color:var(--ink-3)}
+  .empty b{display:block;color:var(--ink);font-weight:500;font-size:15px;margin-bottom:6px}
+
+  /* 弹层 */
+  .mask{position:fixed;inset:0;background:rgba(28,27,25,.42);z-index:60;display:none;overflow-y:auto}
+  .mask.on{display:block}
+  .mask.dark{background:rgba(18,17,16,.85)}
+  .shotwrap{max-width:1000px;margin:34px auto;padding:0 16px}
+  .shotbar{display:flex;align-items:center;gap:12px;padding:0 2px 10px}
+  .shotbar h3{font-size:13px;font-weight:500;color:#fff;flex:1}
+  .shotbar .close{color:#fff}
+  .shotbar .close:hover{background:rgba(255,255,255,.15);color:#fff}
+  .shotbox{background:#fff;border-radius:12px;overflow:hidden;max-height:72vh;overflow-y:auto}
+  .shotbox img{width:100%;display:block}
+  .shotnote{font-size:12px;color:rgba(255,255,255,.78);line-height:1.75;padding:12px 2px 0}
+  .shotnote b{font-weight:500;color:#fff}
+  .sheet{
+    background:var(--surface);border-radius:14px;max-width:680px;margin:44px auto;
+    overflow:hidden;border:1px solid var(--line);
+  }
+  .sheet.wide{max-width:860px}
+  .shead{display:flex;align-items:center;gap:12px;padding:16px 20px;border-bottom:1px solid var(--line)}
+  .shead h3{font-size:15px;font-weight:500;flex:1}
+  .close{font-size:20px;line-height:1;color:var(--ink-3);padding:2px 6px;border-radius:6px}
+  .close:hover{background:#F1EFEB;color:var(--ink)}
+  .sbody{padding:20px}
+
+  /* 录入 */
+  .drop{
+    border:1.5px dashed var(--line-2);border-radius:var(--r);padding:26px;text-align:center;
+    color:var(--ink-3);font-size:13px;cursor:pointer;transition:border-color .15s,background .15s;
+  }
+  .drop:hover{border-color:var(--ink-3);background:#FBFAF8}
+  .drop b{display:block;color:var(--ink);font-weight:500;font-size:14px;margin-bottom:4px}
+  .fl{font-size:12px;color:var(--ink-3);margin:16px 0 6px}
+  .inp{width:100%;border:1px solid var(--line-2);border-radius:8px;padding:9px 11px;outline:none;background:#fff}
+  .inp:focus{border-color:var(--ink-3)}
+  textarea.inp{resize:vertical;min-height:88px;line-height:1.6}
+  .row2{display:flex;gap:14px}
+  .row2 > div{flex:1;min-width:0}
+  .ai{
+    margin-top:16px;border:1px solid var(--line);border-radius:var(--r);
+    background:#FBFAF8;padding:14px;display:none;
+  }
+  .ai.on{display:block}
+  .ai .hd{font-size:12px;color:var(--ink-3);margin-bottom:10px;display:flex;align-items:center;gap:7px}
+  .spin{width:11px;height:11px;border:1.5px solid var(--line-2);border-top-color:var(--ink-2);border-radius:50%;animation:sp .7s linear infinite}
+  @keyframes sp{to{transform:rotate(360deg)}}
+  .ai .val{font-size:13px;padding:7px 0;border-bottom:1px dashed var(--line);display:flex;gap:10px;align-items:flex-start}
+  .ai .val:last-child{border-bottom:none}
+  .ai .val em{font-style:normal;color:var(--ink-3);font-size:12px;width:56px;flex:none;padding-top:1px}
+  .sfoot{padding:14px 20px;border-top:1px solid var(--line);display:flex;gap:10px;align-items:center;background:#FBFAF8}
+  .hint{font-size:12px;color:var(--ink-3);flex:1}
+
+  /* 详情 */
+  .dmedia{background:#EFEDE9;border-radius:var(--r);overflow:hidden;margin-bottom:18px}
+  .dmedia svg{width:100%;height:auto;display:block;max-height:340px}
+  .dmedia img{width:100%;display:block;max-height:340px;object-fit:cover}
+  .dsum{font-size:15px;line-height:1.65;margin-bottom:14px}
+  .dmeta{display:grid;grid-template-columns:88px 1fr;gap:10px 14px;font-size:13px;padding:16px 0;border-top:1px solid var(--line)}
+  .dmeta em{font-style:normal;color:var(--ink-3)}
+  .dmeta a{color:#2E6FD9;text-decoration:none;word-break:break-all}
+  .dmeta a:hover{text-decoration:underline}
+  .dmeta .opt{padding:4px 9px;font-size:12px}
+  .ro-inline{display:none}
+  body.readonly .ro-inline{display:inline}
+  .sub{font-size:12px;color:var(--ink-3);margin:16px 0 8px}
+  .opts{display:flex;flex-wrap:wrap;gap:6px}
+  .opt{font-size:12.5px;padding:6px 11px;border-radius:20px;border:1px solid var(--line-2);color:var(--ink-2)}
+  .opt.aiguess{border:1px dashed #BA7517;color:#854F0B;background:#FAEEDA}
+  .opt.on{background:#1C1B19;color:#fff;border-color:#1C1B19}
+  .optein{width:92px;border:none;background:transparent;outline:none;font:inherit;color:inherit;padding:0;text-align:center;caret-color:currentColor}
+  .optein::placeholder{color:#918D84}
+  .opt.on .optein::placeholder{color:rgba(255,255,255,.5)}
+  .pause{padding:12px 14px;background:#F6F4F0;border:1px solid var(--line);border-radius:var(--r);font-size:12.5px;color:var(--ink-2);line-height:1.7}
+  .pause b{font-weight:500;color:var(--ink)}
+
+  /* 只读分享视图 */
+  .ro{display:none}
+  body.readonly .ro{display:block}
+  body.readonly .edit-only{display:none !important}
+  body.readonly .ribbon{background:#2E6FD9}
+  body.readonly .ribbon b:after{content:" · 访客只读视图"}
+
+  @media (max-width:900px){
+    aside{display:none}
+    main{padding:16px 14px 60px}
+    .sheet{margin:16px 12px;border-radius:12px}
+    .row2{flex-direction:column;gap:0}
+  }
+</style>
+</head>
+<body data-page-node-id="YdmHCdqlg2g6yHVkIxPmbo">
+
+<div class="ribbon" data-page-node-id="9WK7bFFcMQPlUWjGkSul06">
+  <b data-page-node-id="2pC9FCEp0EHRM8E7MD4FUr">界面稿</b>
+  <span data-page-node-id="G1i1aik0eoIN8vWb08GqV8">已填入你发来的 5 条真实素材 · AI 字段为模拟结果 · 未接后端</span>
+  <span style="flex:1" data-page-node-id="2nKkjnQBREnk6GNC14lNI1"></span>
+  <button class="btn ghost sm edit-only" id="toggleShare" style="border-color:#4A4843;color:#F2F0EC" data-page-node-id="hJEHNnBONeBqI8BVk6clrN">预览分享视图</button>
+</div>
+
+<header data-page-node-id="mHkiSsunpXy0P2BHL5d3eW">
+  <div class="logo" data-page-node-id="6M72uZZjgPEQELU9v1jjVq"><i data-page-node-id="ho9lZKCXdFk7GnmTtBp9Bb"></i>Elangit</div>
+  <div class="search" data-page-node-id="tG5PWJkvU9Lsfl2YTNQ8xY">
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" data-page-node-id="1aKbF95eQXs04OuYYcGAuA"><circle cx="7" cy="7" r="4.5" stroke="#1C1B19" stroke-width="1.3" data-page-node-id="T590LEr3Fyq2EWzTtXMns0"/><path d="M10.5 10.5 14 14" stroke="#1C1B19" stroke-width="1.3" stroke-linecap="round" data-page-node-id="DFq1K71SxKMbmxEcxkA8aI"/></svg>
+    <input id="q" type="search" placeholder="搜摘要、画面描述、图中文字、标签、备注" data-page-node-id="CtoP7wsZB6sWVSWiKGgFv7">
+  </div>
+  <div class="spacer" data-page-node-id="M3payzLUtcM0BD2FUL1q2b"></div>
+  <button class="btn edit-only" id="openAdd" data-page-node-id="vGRStPsZEWeGaoiXExGHxf">＋ 收进灵感</button>
+</header>
+
+<div class="layout" data-page-node-id="8fbTCKnRjX2M6S2aD46xb0">
+  <aside data-page-node-id="NAxPDm7BonC4zxUQJb97x0">
+    <div class="sec" data-page-node-id="HFEX5aWFWWbkp7ywXecQ1G">
+      <h3 data-page-node-id="IkasMHyGzk3e2dHCGly20Z">抽屉</h3>
+      <button class="nav-item on" data-cat="全部" data-page-node-id="K618W2CY57FgG9CX3hl3TP"><span class="n" data-page-node-id="NxrkTW1zWaDp0LgINtp99Z">全部素材</span><span class="c" id="cAll" data-page-node-id="jdzYHCSuTsdYg2FFHydorj">0</span></button>
+      <div id="catNav" data-page-node-id="aytE0JsglqXu43mAa54JDq"></div>
+    </div>
+    <div class="sec" data-page-node-id="Kdfwt9oybZSpie5cKU2LGx">
+      <h3 data-page-node-id="mxucpWdjuB9hKI9bHxOnNp">标签</h3>
+      <div id="tagNav" data-page-node-id="Wh5zaP7AN36V5GjsGR8cFg"></div>
+    </div>
+  </aside>
+
+  <main data-page-node-id="L7GMIHIRtrq4vDYXBrYUMd">
+    <div class="bar" data-page-node-id="OHSuLeHnQxvHlwA3wJyguq">
+      <h2 id="title" data-page-node-id="ywlmByonesJ6NFJdSsCbdi">全部素材</h2>
+      <span class="meta" id="count" data-page-node-id="B9R5vs8OxnRpSvoIPi0LWy"></span>
+      <div class="spacer" data-page-node-id="RKtOvgGgpdKkF3UjuIU3x6"></div>
+      <button class="reset" id="reset" style="display:none" data-page-node-id="JP1y8lJD1aunIUsIrbHnBQ">清空筛选</button>
+    </div>
+    <div class="grid" id="grid" data-page-node-id="1wKJ0oAGMCFqHUKikC7VlM"></div>
+    <div class="empty" id="empty" style="display:none" data-page-node-id="JuXYk0Mfk5vxERFcBvx4hH">
+      <b data-page-node-id="o7UD91IBmTEagADKVqO6jO">没找到</b>
+      试试换个词，或者清空筛选条件
+      <div style="margin-top:16px" data-page-node-id="staSdkcFBJKSdp7R0eAJRL"><button class="btn ghost sm" id="reset2" data-page-node-id="FNXR9NbqGHHMHBdJ61pScC">清空筛选</button></div>
+    </div>
+  </main>
+</div>
+
+<div class="mask" id="addModal" data-page-node-id="GATZ5zdCPQpHnrMePmYSu4">
+  <div class="sheet" data-page-node-id="5aT4bBycFkQdkLBGpFZbWg">
+    <div class="shead" data-page-node-id="O4XvDEoBjeAStA6VFFzIXr"><h3 data-page-node-id="5pvY3ZBOPBq2TRteKFfBWG">收进灵感</h3><button class="close" data-close data-page-node-id="n5niETCFO0cc8AQZJAq4BB">×</button></div>
+    <div class="sbody" data-page-node-id="5NMKlfiColDdV0RlL1Jc6a">
+      <div class="drop" id="dropTap" data-page-node-id="N4J149yUQkNiPIw0DlVzu2">
+        <b data-page-node-id="a8qnW6tZAKnW6tIKOqaFqo">粘贴截图，或点这里上传</b>
+        支持多张。手机端可直接从相册选
+      </div>
+      <div class="fl" data-page-node-id="RkTgPFznl38n4DDalnWtc5">粘贴文本（可选）</div>
+      <textarea class="inp" id="fText" placeholder="把看到的文字贴进来，比如小红书的标题和正文"></textarea>
+      <div class="row2" data-page-node-id="RPp187D8FtACFwwDI9IBqK">
+        <div data-page-node-id="mrDdmlsqRzSEyKbrbbAl26">
+          <div class="fl" data-page-node-id="omXEeOaMUFbRstsM7cbRdQ">网址（可选）</div>
+          <input class="inp" id="fUrl" placeholder="原文链接" data-page-node-id="X6rWCey2zlbsOBdK8sDuA2">
+        </div>
+        <div data-page-node-id="Zw2HT2RXZFd3ePCoamKwHI">
+          <div class="fl" data-page-node-id="umSFnq8Xo9Q1xj187GmVhf">来源平台（可选，也可由 AI 猜）</div>
+          <input class="inp" id="fPlat" placeholder="小红书 / 公众号 / 网页" data-page-node-id="EVBkMcZjSu8a51SAqNqBWT">
+        </div>
+      </div>
+      <div class="fl" data-page-node-id="t48J1DzjdoWvrv8AGFhJsD">我为什么存它（可选，但最有价值的一项）</div>
+      <input class="inp" id="fNote" placeholder="打算用在哪、想拿走什么，一句话就够" data-page-node-id="D8EdDI6XCIIFE6KJjxpyYq">
+      <div class="ai" id="aiBox" data-page-node-id="IN7ayyU5TaMWdu3uHdyrKg">
+        <div class="hd" id="aiHd" data-page-node-id="nln1BKEQsHcgkLNuVu8sdu"><span class="spin" data-page-node-id="wzNCzr4ltE1xeGDcacsK0P"></span>AI 正在读这条素材…</div>
+        <div id="aiResult" style="display:none" data-page-node-id="u86pOp6V1aSJolUHkHD75O">
+          <div class="val" data-page-node-id="ppZLbEiJXWqXvGbG54hOCG"><em data-page-node-id="0yzCY18I1a9qn6PsyEShCn">摘要</em><span id="rSum" data-page-node-id="Sd2hLcmSl1PhE7PYvCK8tl"></span></div>
+          <div class="val" data-page-node-id="2mzCug7pS7JxQvBgAp9kUM"><em data-page-node-id="qPU9vJcul2xTUp2JIXl9Mu">画面描述</em><span id="rCap" data-page-node-id="YldqnnPeGHWlDmRXdZj9md"></span></div>
+          <div class="val" data-page-node-id="3nkESfMHodVR7NgLRNWFwE"><em data-page-node-id="tGZjSjbb5jATjjJOVuem7E">图中文字</em><span id="rOcr" style="color:var(--ink-2)" data-page-node-id="ihQylg44GQHsjcFiZOOLCO"></span></div>
+          <div class="val" data-page-node-id="jMgviyNTLOdMFmWzKjpFEf"><em data-page-node-id="Sx6mSVyeiVCXuVNGMylc4B">抽屉</em><span id="rCat" data-page-node-id="q8ACg6RLIEAOxg2ScFTJFN"></span></div>
+          <div class="val" data-page-node-id="kpzBsH8OCqS9XBFjJaiqf4"><em data-page-node-id="zSYoG403dZVJEP9CzFjKEs">标签</em><span id="rTags" style="display:flex;flex-wrap:wrap;gap:4px" data-page-node-id="Ol9X7GY3stmm88z4THI987"></span></div>
+        </div>
+      </div>
+    </div>
+    <div class="sfoot" data-page-node-id="mCSl7Tr78HsQgWXWGrPLJf">
+      <span class="hint" data-page-node-id="AmZTF0dT9EmyBE9g5rll2b">只有「至少一项原始内容」是必填。抽屉与标签可以不改直接用。</span>
+      <button class="btn ghost" data-close data-page-node-id="CD7OzTgkecnP3nJrCT43u8">取消</button>
+      <button class="btn" id="submitAdd" data-page-node-id="F3fMa7HfGMvI79vwgNBIAb">收进灵感库</button>
+    </div>
+  </div>
+</div>
+
+<div class="mask" id="detailModal" data-page-node-id="aNZ2IRAKhBFYHuhtuukrBl">
+  <div class="sheet wide" data-page-node-id="NMKDPTJJFwTp49SR0TUjRu">
+    <div class="shead" data-page-node-id="vwXTUHYxGKJqvNLPPeWdCw">
+      <h3 id="dTitle" data-page-node-id="eNExAN4zV3XKdu9q6HULTC">素材详情</h3>
+      <button class="close" data-close data-page-node-id="OkzaHFpZsw5RnbldDloDSN">×</button>
+    </div>
+    <div class="sbody" id="dBody" data-page-node-id="BOp1L3jJEjSsqSt3X2hJOc"></div>
+  </div>
+</div>
+
+<div class="mask dark" id="shotModal">
+  <div class="shotwrap">
+    <div class="shotbar">
+      <h3 id="shotTitle">原始截图</h3>
+      <button class="close" data-close>×</button>
+    </div>
+    <div class="shotbox"><img id="shotImg" alt=""></div>
+    <p class="shotnote"><b>这是你上传的原始截图，原件始终保留。</b>卡片封面由系统从截图里自动裁出主体部分（去掉文字面板与白边），避免卡片里出现半张照片半张文字。裁得不合适时，可以在详情页换回原图或重新指定封面。</p>
+  </div>
+</div>
+
+<script>
+const CATS = ['城市与公共空间','建筑与构筑物','自然与生态','历史与遗产','表达与方法','其他 / 待归类'];
+const FALLBACK = '其他 / 待归类';
+const PLATS = ['小红书','公众号','网页','其他'];
+
+const GROUPS = [
+  { key:'ref',   name:'参考与借鉴', c:'var(--g1)', bg:'var(--g1b)' },
+  { key:'scene', name:'应用场景',   c:'var(--g2)', bg:'var(--g2b)' },
+  { key:'vis',   name:'视觉与技法', c:'var(--g3)', bg:'var(--g3b)' },
+  { key:'obj',   name:'对象类型',   c:'var(--g4)', bg:'var(--g4b)' },
+  { key:'act',   name:'问题与动作', c:'var(--g5)', bg:'var(--g5b)' }
+];
+const GROUP_OF = {};
+['竞赛参考','案例参考','失败案例','行业动态'].forEach(t=>GROUP_OF[t]='ref');
+['室内装饰','室外装饰','景观装置','城市家具'].forEach(t=>GROUP_OF[t]='scene');
+['颜色搭配','排版','材质','光影'].forEach(t=>GROUP_OF[t]='vis');
+['学校','住宅','商业','公园','广场','滨水','文化建筑','社区建筑','公共建筑','产业建筑'].forEach(t=>GROUP_OF[t]='obj');
+['旧建筑改造','生态修复','适老化','儿童友好','无障碍','社区营造','低成本建造','气候适应','低碳技术','水资源循环'].forEach(t=>GROUP_OF[t]='act');
+const G = k => GROUPS.find(g=>g.key===(GROUP_OF[k]||'ref'));
+
+const PAL = [
+  ['#E9E4DA','#CFC6B4','#94897A'],
+  ['#E2EAE6','#B2C6BC','#6D857A'],
+  ['#E8E5EF','#BFB8D4','#7C7395'],
+  ['#F1E4DE','#D5B5A5','#997763'],
+  ['#E3E9F0','#B2C3D5','#73879B']
+];
+
+function art(i){
+  const p = PAL[i % PAL.length];
+  let inner = '';
+  const k = i % 4;
+  if(k===0){ for(let a=0;a<5;a++){ for(let b=0;b<4;b++){ if((a*3+b*5+i)%4===0) continue;
+    inner += `<rect x="${18+a*30}" y="${16+b*24}" width="24" height="18" fill="${(a+b)%3?p[1]:p[2]}" opacity="${0.35+((a+b)%3)*0.22}"/>`; } } }
+  else if(k===1){ for(let a=0;a<7;a++){ const y=22+a*13;
+    inner += `<path d="M0 ${y} C 60 ${y-16}, 130 ${y+18}, 200 ${y-6} S 320 ${y+10}, 400 ${y-8}" fill="none" stroke="${a%3?p[1]:p[2]}" stroke-width="1.2" opacity=".65"/>`; } }
+  else if(k===2){ inner += `<rect x="0" y="96" width="400" height="54" fill="${p[1]}" opacity=".5"/>`;
+    for(let a=0;a<4;a++){ inner += `<rect x="${34+a*52}" y="${60-a*11}" width="42" height="${36+a*11}" fill="${a%2?p[1]:p[2]}" opacity=".55"/>`; }
+    inner += `<path d="M0 96 L400 96" stroke="${p[2]}" stroke-width="1.2"/>`; }
+  else { for(let a=0;a<6;a++){ for(let b=0;b<4;b++){ inner += `<rect x="${20+a*60}" y="${18+b*36}" width="46" height="26" fill="none" stroke="${p[2]}" stroke-width=".9" opacity=".5"/>`; } }
+    inner += `<circle cx="196" cy="82" r="34" fill="${p[1]}" opacity=".75"/><circle cx="196" cy="82" r="16" fill="${p[0]}"/>`; }
+  return `<svg viewBox="0 0 400 300" preserveAspectRatio="xMidYMid slice"><rect width="400" height="300" fill="${p[0]}"/>${inner}</svg>`;
+}
+
+let ITEMS = [
+  { id:1, t:'2025 阿卡汗建筑奖公布', sum:'七个获奖作品都在回答同一件事：怎么用很低的成本，把社区真正用起来',
+    cap:'获奖作品拼贴图，含内蒙古西乌素图村民中心、孟加拉竹钢庇护所、埃及 Esna 历史城市复兴等七个项目',
+    ocr:'2025 阿卡汗建筑奖 · 西乌素图村民中心 / Khudi Bari 庇护所 / 历史城市 Esna 复兴计划 / Jahad 地铁广场 / 马拉加住宅与社区重建 / Pakistan 新视界 / 奇境',
+    cat:'其他 / 待归类', plat:'网页', url:'https://www.gooood.cn/winners-of-the-2025-aga-khan-award-for-architecture-announced.htm',
+    tags:['案例参考','文化建筑','社区营造','低成本建造'], img:'assets/aga-khan.jpg', note:'' },
+  { id:2, t:'衡水垂直农场', sum:'把垂直种植、教育展示和办公叠进一栋四层玻璃楼，共 12,800 ㎡',
+    cap:'夜景鸟瞰，折叠状玻璃立面透出紫色 LED 光，四周是温室园区与农田',
+    ocr:'衡水垂直农场 / van Bergen Kolpa Architects · 建筑面积 12800 平方米 · 委托方 AgriGarden',
+    cat:'建筑与构筑物', plat:'网页', url:'https://www.gooood.cn/vertical-farm-hengshui-by-van-bergen-kolpa-architects.htm',
+    tags:['产业建筑','低碳技术','水资源循环','案例参考'], img:'assets/hengshui.jpg', note:'' },
+  { id:3, t:'Ghaf Woods 体验中心', sum:'沙丘形态的社区体验中心，用一条递进的空间序列把城市喧嚣挡在外面',
+    cap:'鸟瞰照片，建筑以沙丘状屋顶从沙漠地形升起，周围是成片种植的林地',
+    ocr:'Ghaf Woods体验中心，迪拜 / aoe事建组 · 建筑面积 450 平方米 · 2025 年完成',
+    cat:'建筑与构筑物', plat:'网页', url:'https://www.gooood.cn/ghaf-woods-experience-centre-by-aoe.htm',
+    tags:['文化建筑','气候适应','材质','案例参考'], img:'assets/ghaf-woods.jpg', note:'' },
+  { id:4, t:'Ses Clotades 白色住宅', sum:'白色方块体量嵌进松林坡地，泳池和木平台是整块场地上唯一的水平面',
+    cap:'俯视实景，白色平屋顶住宅卧在灌木坡地上，前景是木平台与蓝色泳池，远处为海与山脊',
+    ocr:'案例分享 | Ses Clotades · 建筑设计：Maria Castillo Martinez 建筑事务所 · 室内面积 295 平方米 · #住宅设计 #别墅设计 #自然主义设计 #室内设计灵感',
+    cat:'建筑与构筑物', plat:'小红书', url:'',
+    tags:['住宅','颜色搭配','室外装饰','材质'],
+    img:'assets/ses-clotades-cover.jpg', shot:'assets/ses-clotades.png', note:'' },
+  { id:5, t:'纽约高线公园 High Line', sum:'把一条废弃的高架铁路改成 2.3 公里线性公园，给城市补上一条空中步道',
+    cap:'黄昏实景，人群走在锈色钢结构高架上，两侧是观赏草与远处曼哈顿楼群',
+    ocr:'纽约高线公园（High Line）· 全长约 2.3 公里 · 景观设计：James Corner (Field Operations) · 1999 年 Friends of the High Line 推动保留而非拆除 · 设计亮点：保留工业遗产、铺装裂缝 Plank System',
+    cat:'历史与遗产', plat:'小红书', platAi:'网页', url:'',
+    tags:['旧建筑改造','公园','材质','案例参考'],
+    img:'assets/high-line-cover.jpg', shot:'assets/high-line.jpg', note:'' }
+];
+
+let state = { cat:'全部', tags:[], q:'' };
+
+const $ = s => document.querySelector(s);
+const esc = s => (s||'').replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+function chipHTML(tag, on){
+  const g = G(tag);
+  return `<button class="chip ${on?'on':''}" data-tag="${esc(tag)}" style="color:${g.c};background:${g.bg}">${esc(tag)}</button>`;
+}
+function tagRow(tags){
+  return tags.map(t=>{ const g=G(t); return `<span class="chip" style="color:${g.c};background:${g.bg}">${esc(t)}</span>`; }).join('');
+}
+
+function renderNav(){
+  $('#cAll').textContent = ITEMS.length;
+  $('#catNav').innerHTML = CATS.map(c=>{
+    const n = ITEMS.filter(i=>i.cat===c).length;
+    return `<button class="nav-item ${state.cat===c?'on':''}" data-cat="${esc(c)}">
+      <span class="n">${esc(c)}</span><span class="c">${n||''}</span></button>`;
+  }).join('');
+  $('#tagNav').innerHTML = GROUPS.map(g=>{
+    const list = Object.keys(GROUP_OF).filter(t=>GROUP_OF[t]===g.key && ITEMS.some(i=>i.tags.includes(t)));
+    if(!list.length) return '';
+    return `<div class="taggroup">
+      <h4 style="color:${g.c}"><i style="background:${g.c}"></i>${g.name}</h4>
+      <div class="chips">${list.map(t=>chipHTML(t, state.tags.includes(t))).join('')}</div>
+    </div>`;
+  }).join('');
+}
+
+function match(i){
+  if(state.cat!=='全部' && i.cat!==state.cat) return false;
+  if(state.tags.length && !state.tags.every(t=>i.tags.includes(t))) return false;
+  if(state.q){
+    const hay = [i.t,i.sum,i.cap,i.ocr,i.note,i.cat,...i.tags].join(' ');
+    if(!hay.toLowerCase().includes(state.q.toLowerCase())) return false;
+  }
+  return true;
+}
+
+function render(){
+  renderNav();
+  const list = ITEMS.filter(match);
+  $('#title').textContent = state.cat==='全部' ? '全部素材' : state.cat;
+  $('#count').textContent = list.length ? `${list.length} 条` : '';
+  const dirty = state.cat!=='全部' || state.tags.length || state.q;
+  $('#reset').style.display = dirty ? '' : 'none';
+
+  $('#grid').innerHTML = list.map(i=>`
+    <div class="card" data-id="${i.id}">
+      <div class="thumb ${i.text?'notxt':''}">${ i.text
+        ? `<p>这条没有配图<br>纯文本素材也照样进库</p>`
+        : (i.img ? `<img src="${esc(i.img)}" alt="">` : art(i.id)) }</div>
+      <div class="cmrow">
+        <span>${esc(i.plat)}</span>
+        <span class="sp"></span>
+        ${ i.shot ? `<button class="linkbtn" data-shot="${i.id}">查看截图</button>` : '' }
+        ${ i.url ? `<a class="linkbtn" href="${esc(i.url)}" target="_blank" rel="noopener">打开原文</a>` : '' }
+      </div>
+      <div class="cbody">
+        <div class="csum">${esc(i.sum)}</div>
+        <div class="ctags">${tagRow(i.tags.slice(0,4))}${i.tags.length>4?`<span class="chip" style="color:var(--ink-3);background:#F1EFEB">+${i.tags.length-4}</span>`:''}</div>
+      </div>
+    </div>`).join('');
+
+  $('#grid').style.display = list.length ? '' : 'none';
+  $('#empty').style.display = list.length ? 'none' : '';
+}
+
+function platOptsHTML(cur, aiGuess){
+  const custom = PLATS.indexOf(cur) < 0;
+  return PLATS.map(p=>{
+    const isOther = p === '其他';
+    const on = isOther ? (cur === '其他' || custom) : (cur === p);
+    const label = (isOther && custom) ? cur : p;
+    const ai = aiGuess && aiGuess === p && aiGuess !== cur;
+    return `<button class="opt${on?' on':''}${ai?' aiguess':''}" data-plat="${esc(p)}">${esc(label)}</button>`;
+  }).join('');
+}
+
+function openShot(id){
+  const i = ITEMS.find(x=>x.id===id);
+  if(!i || !i.shot) return;
+  $('#shotTitle').textContent = '原始截图 · ' + i.t;
+  $('#shotImg').src = i.shot;
+  $('#shotModal').classList.add('on');
+}
+
+function openDetail(id){
+  const i = ITEMS.find(x=>x.id===id);
+  $('#detailModal').dataset.id = i.id;
+  $('#dTitle').textContent = i.t;
+  $('#dBody').innerHTML = `
+    ${ i.text ? '' : `<div class="dmedia">${ i.img ? `<img src="${esc(i.img)}" alt="">` : art(i.id) }</div>` }
+    <div style="display:flex;align-items:center;gap:10px;margin:-6px 0 16px">
+      <span style="font-size:12px;color:var(--ink-3);flex:1">${ i.shot ? '封面由系统从截图里裁出主体部分' : '封面使用原文配图' }</span>
+      ${ i.shot ? `<button class="linkbtn" data-shot="${i.id}">查看原始截图</button>` : '' }
+    </div>
+    <div class="dsum">${esc(i.sum)}</div>
+    ${ i.cap ? `<div class="sub">画面描述（AI 生成）</div><div style="font-size:13px;color:var(--ink-2)">${esc(i.cap)}</div>` : '' }
+    ${ i.ocr ? `<div class="sub">图中文字（AI 提取）</div><div style="font-size:13px;color:var(--ink-2)">${esc(i.ocr)}</div>` : '' }
+    <div class="dmeta">
+      <em>抽屉</em><span>${esc(i.cat)}</span>
+      <em>标签</em><span style="display:flex;flex-wrap:wrap;gap:5px">${tagRow(i.tags)}</span>
+      <em>来源</em><span style="display:flex;flex-wrap:wrap;align-items:center;gap:6px">
+        <span class="opts edit-only" id="platOpts" style="display:inline-flex;gap:5px">${platOptsHTML(i.plat, i.platAi)}</span>
+        <span class="ro-inline">${esc(i.plat)}</span>
+        ${ i.url ? `<a href="${esc(i.url)}" target="_blank" rel="noopener" style="font-size:12px">在原帖打开</a>` : '' }
+        ${ (i.platAi && i.platAi!==i.plat) ? `<span class="edit-only" style="flex-basis:100%;font-size:11.5px;color:var(--ink-3)"><span style="display:inline-block;width:9px;height:9px;border:1px dashed #BA7517;border-radius:3px;background:#FAEEDA;vertical-align:-1px;margin-right:4px"></span>黄色虚线框是 AI 猜的，不对就点别的。点「其他」可以自己填</span>` : '' }
+      </span>
+      <em>我的备注</em><span>${i.note?esc(i.note):'<span style="color:var(--ink-3)">还没写</span>'}</span>
+    </div>
+    <div class="edit-only">
+      <div class="sub">改抽屉（AI 原先判断为「${esc(i.cat)}」）</div>
+      <div class="opts" id="catOpts">${CATS.map(c=>`<button class="opt ${c===i.cat?'on':''}">${esc(c)}</button>`).join('')}</div>
+      <div class="sub">标签</div>
+      <div class="opts" id="tagOpts">${i.tags.map(t=>`<button class="opt on">${esc(t)}</button>`).join('')}
+        <button class="opt" style="border-style:dashed">＋ 加标签</button></div>
+    </div>
+    <div class="sub">分享</div>
+    <div class="pause">
+      <b>分享这一条</b> —— 生成一个只读链接，对方只能看到这一条，看不到你的整个收藏夹。<br>
+      分享总开关默认关闭，你开启后才会生成链接，随时可以关闭让链接失效。
+      <div style="margin-top:10px;display:flex;gap:8px">
+        <button class="btn ghost sm">复制单条链接</button>
+        <button class="btn ghost sm">管理收藏夹分享</button>
+      </div>
+    </div>`;
+  $('#detailModal').classList.add('on');
+}
+
+document.addEventListener('click', e=>{
+  const c = e.target.closest('[data-cat]');
+  if(c){ state.cat = c.dataset.cat; render(); return; }
+  const t = e.target.closest('[data-tag]');
+  if(t){ const v=t.dataset.tag;
+    state.tags = state.tags.includes(v) ? state.tags.filter(x=>x!==v) : [...state.tags, v];
+    render(); return; }
+  if(e.target.closest('[data-close]')){ document.querySelectorAll('.mask').forEach(m=>m.classList.remove('on')); return; }
+  if(e.target.closest('a')) return;
+  const sh = e.target.closest('[data-shot]');
+  if(sh){ openShot(+sh.dataset.shot); return; }
+  const card = e.target.closest('.card');
+  if(card){ openDetail(+card.dataset.id); return; }
+  const opt = e.target.closest('.opt');
+  if(opt){
+    const box = opt.parentElement;
+    if(box.id==='platOpts'){
+      const it = ITEMS.find(x=>x.id === +$('#detailModal').dataset.id);
+      if(!it) return;
+      const ro = box.parentElement.querySelector('.ro-inline');
+      if(opt.dataset.plat === '其他'){
+        const editing = opt.querySelector('input');
+        if(editing){ editing.focus(); return; }
+        [...box.children].forEach(o=>o.classList.remove('on'));
+        opt.classList.add('on');
+        const cur = PLATS.indexOf(it.plat) < 0 ? it.plat : '';
+        opt.innerHTML = `<input class="optein" type="text" placeholder="填写来源" value="${esc(cur)}">`;
+        const inp = opt.querySelector('input');
+        inp.focus(); inp.select();
+        const commit = ()=>{
+          if(inp.dataset.done) return;
+          inp.dataset.done = '1';
+          const v = inp.value.trim() || '其他';
+          it.plat = v;
+          box.innerHTML = platOptsHTML(v, it.platAi);
+          if(ro) ro.textContent = v;
+          render();
+        };
+        inp.addEventListener('keydown', ev=>{ if(ev.key==='Enter'){ ev.preventDefault(); inp.blur(); } });
+        inp.addEventListener('blur', commit);
+        return;
+      }
+      [...box.children].forEach(o=>o.classList.remove('on'));
+      opt.classList.add('on');
+      it.plat = opt.dataset.plat;
+      if(ro) ro.textContent = it.plat;
+      render();
+      return;
+    }
+    if(box.id==='catOpts'){ [...box.children].forEach(o=>o.classList.remove('on')); opt.classList.add('on'); }
+    else opt.classList.toggle('on');
+  }
+});
+
+$('#q').addEventListener('input', e=>{ state.q = e.target.value.trim(); render(); });
+[$('#reset'), $('#reset2')].forEach(b=>b&&b.addEventListener('click', ()=>{
+  state = { cat:'全部', tags:[], q:'' }; $('#q').value=''; render();
+}));
+
+$('#openAdd').addEventListener('click', ()=>{ $('#addModal').classList.add('on'); });
+$('#dropTap').addEventListener('click', ()=>{ $('#dropTap').innerHTML = '<b>已接收 2 张截图</b>可以继续粘贴，或点「收进灵感库」'; });
+
+$('#submitAdd').addEventListener('click', ()=>{
+  const box = $('#aiBox'); box.classList.add('on');
+  $('#aiHd').style.display=''; $('#aiResult').style.display='none';
+  setTimeout(()=>{
+    $('#aiHd').style.display='none'; $('#aiResult').style.display='';
+    const txt = $('#fText').value || $('#fUrl').value || '（截图素材）';
+    $('#rSum').textContent = '把硬质驳岸拆成三级台地，用植物缓冲带替代挡墙';
+    $('#rCap').textContent  = '驳岸剖面示意，由水面向岸依次为沉水植物、湿生植物、草坡';
+    $('#rOcr').textContent  = '滨水空间 生态驳岸做法';
+    $('#rCat').innerHTML = '自然与生态 <span style="color:var(--ink-3);font-size:12px">（AI 判断，可改）</span>';
+    $('#rTags').innerHTML = ['生态修复','案例参考','滨水'].map(t=>chipHTML(t,false)).join('');
+  }, 1400);
+});
+
+$('#toggleShare').addEventListener('click', ()=>{
+  document.body.classList.toggle('readonly');
+  $('#toggleShare').textContent = document.body.classList.contains('readonly') ? '退出分享视图' : '预览分享视图';
+  if(document.body.classList.contains('readonly')) document.querySelectorAll('.mask').forEach(m=>m.classList.remove('on'));
+});
+
+render();
+</script>
+</body>
+</html>
