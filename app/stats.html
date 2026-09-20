@@ -43,6 +43,10 @@
   .rtab .no{color:#B4632A}
   .rtab .na{color:var(--ink-3)}
 
+  /* 「待人工复盘」是第三种状态：素材够 30 条只说明「可以复盘了」，不等于复盘做过了。
+     既不是达标也不是未达标，所以不复用 ok/no 的配色 —— 复用了会让人以为是系统判的。 */
+  .rtab .wait{color:var(--ink-2)}
+
   .track{height:6px;border-radius:3px;background:#EFEDE9;overflow:hidden;margin-top:6px}
   .track i{display:block;height:100%;background:#1C1B19}
 
@@ -74,7 +78,8 @@
   <h1>数据</h1>
   <div class="sub">
     只为回答一件事：<b>PRD 1.2 的核心假设成不成立</b>。<br>
-    下面的数字都从库里现算，不是写死的历史值 —— 所以样本少的时候它们会很难看，这是对的。
+    下面的数字都从库里现算，不是写死的历史值 —— 所以样本少的时候它们会很难看，这是对的。<br>
+    门槛（多少条才算数）只在 <code>stats.js</code> 里定义一处：<b>不到门槛就不给百分比</b>，只报还差多少。
   </div>
 
   <div class="panel rep">
@@ -91,13 +96,13 @@
 
   <div class="panel rep">
     <h2>AI 字段修改率 <span class="tag">A2：标签可用率 ≥ 70%</span></h2>
-    <div class="why" id="diffWhy">按字段算「用户改过的条数 / 有 AI 原值的条数」。改得越少说明 AI 判得越准。</div>
+    <div class="why" id="diffWhy">按字段算「用户改过的条数 / 有 AI 原值的条数」，只取<b>最早 50 条</b>有原值的样本。改得越少说明 AI 判得越准。</div>
     <div id="diff"></div>
   </div>
 
   <div class="panel rep">
     <h2>找回效率 <span class="tag">A4：10 次检索里 ≥ 8 次能在 10 秒内找到</span></h2>
-    <div class="why">从「执行搜索/筛选」到「点开某一条」的间隔。只算点进详情的那种点击 —— 「看原始截图」是扫一眼就走，不代表找到了。</div>
+    <div class="why">分母是<b>发起的检索次数</b>，包含那些发起后根本没点开的。只算点进详情的那种点击 —— 「看原始截图」是扫一眼就走，不代表找到了。</div>
     <div id="search"></div>
   </div>
 
@@ -124,17 +129,24 @@
 <!-- diff.js 与详情页共用同一套「AI 原值 → 现值」比较规则。
      两处各写一份的话，详情页说改了 3 处、这里说 2 处，就不可能有结论了。 -->
 <script src="diff.js"></script>
+<!-- stats.js：门槛与统计的纯函数。抽出来的理由不是「好看」，是「可测」——
+     渲染函数是 IIFE 私有的，一次性验证台拿不到，19/20、49/50、9/10、29/30
+     这些临界值就只能靠肉眼看。抽出来才能断言。 -->
+<script src="stats.js"></script>
 <script src="track.js"></script>
 <script src="ownerbar.js"></script>
 <script>
 (function () {
   'use strict';
-  var S = window.Elangit.store, C = window.Elangit.cards, T = window.Elangit.track, D = window.Elangit.diff;
+  var S = window.Elangit.store, C = window.Elangit.cards, T = window.Elangit.track,
+      D = window.Elangit.diff, ST = window.Elangit.stats;
   var $ = function (id) { return document.getElementById(id); };
   var esc = C.esc;
 
-  var DAYS = 14;                       // 每日录入图看两周
+  var DAYS = 14;                       // 每日录入图看两周（= A12 的门槛，来自 stats.GATES.A12）
   var EV_SINCE_DAYS = 60;              // 事件只往回读 60 天，够算所有指标
+                                       // ⚠️ A1 不用这个窗口：它要的是「最早 20 条」，
+                                       // 走 loadFirstEvents 单独查，不受 60 天限制。
 
   /* ---------- 小工具 ---------- */
 
@@ -158,22 +170,43 @@
     var p = k.split('-');
     return Number(p[1]) + '/' + Number(p[2]);
   }
-  function mean(a) {
-    return a.length ? a.reduce(function (x, y) { return x + y; }, 0) / a.length : null;
-  }
-  function median(a) {
-    if (!a.length) return null;
-    var s = a.slice().sort(function (x, y) { return x - y; });
-    var m = Math.floor(s.length / 2);
-    return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
-  }
+  // 均值/中位数不在这里再写一遍 —— 它们是 stats.js 的。口径必须只有一处，
+  // 否则「同一个指标，两个面板两个数」迟早发生。
   function sec(ms) { return ms == null ? '—' : (ms / 1000).toFixed(1) + 's'; }
   function pct(x) { return x == null ? '—' : (x * 100).toFixed(0) + '%'; }
-  function na(text) { return '<span class="na">' + text + '</span>'; }
+  function na(text) { return '<span class="na">' + esc(text) + '</span>'; }
+
+  // 「还差多远」用的进度条。它不下结论，只表示距离门槛的位置 ——
+  // 这是「不显示百分比」和「什么都不说」之间的那条路。
+  function progress(n, need) {
+    return '<div class="track" style="margin-top:12px"><i style="width:'
+      + Math.round(Math.min(need ? n / need : 1, 1) * 100) + '%"></i></div>';
+  }
+
+  // 事件按时间正序。比例本身与顺序无关，但排序后「最近一次」之类的读法才正确。
+  function byAt(a, b) {
+    return String(a.at) < String(b.at) ? -1 : (String(a.at) > String(b.at) ? 1 : 0);
+  }
+
+  function dailyCounts() {
+    var days = lastDays(DAYS), count = {};
+    days.forEach(function (d) { count[d] = 0; });
+    state.items.forEach(function (it) {
+      var k = dayKey(it.created_at);
+      if (count[k] !== undefined) count[k]++;
+    });
+    return { days: days, vals: days.map(function (d) { return count[d]; }) };
+  }
+  // 连续天数从今天往回数：今天没录就断在今天（不算「还在连续」）
+  function streakFrom(vals) {
+    var s = 0;
+    for (var i = vals.length - 1; i >= 0; i--) { if (vals[i] > 0) s++; else break; }
+    return s;
+  }
 
   /* ---------- 数据 ---------- */
 
-  var state = { items: [], events: [], tax: null };
+  var state = { items: [], events: [], a1Events: [], tax: null };
 
   function boot() {
     if (!window.Elangit.auth.isOwner()) {
@@ -187,11 +220,16 @@
     Promise.all([
       S.reportItems(),
       S.loadEvents(null, since),
-      S.loadTaxonomy()
+      S.loadTaxonomy(),
+      // A1 的样本窗口是**查询的属性**，必须单独取：
+      // loadEvents 是倒序 + 只看 60 天，在它上面 slice(0, 20) 拿到的是
+      // 「最近 60 天里最新的 20 条」，不是 PRD 要的「最早 20 条」。
+      S.loadFirstEvents('item_create_finish', ST.GATES.A1)
     ]).then(function (r) {
       state.items = r[0];
       state.events = r[1];
       state.tax = r[2];
+      state.a1Events = r[3];
       $('hdrNote').textContent = state.items.length + ' 条素材 · ' + state.events.length + ' 条事件';
       $('report').style.display = 'block';
       renderDaily();
@@ -209,23 +247,11 @@
   /* ---------- 1. 每日录入条数 ---------- */
 
   function renderDaily() {
-    var days = lastDays(DAYS);
-    var count = {};
-    days.forEach(function (d) { count[d] = 0; });
-    state.items.forEach(function (it) {
-      var k = dayKey(it.created_at);
-      if (count[k] !== undefined) count[k]++;
-    });
-
-    var vals = days.map(function (d) { return count[d]; });
+    var dc = dailyCounts();
+    var days = dc.days, vals = dc.vals;
     var max = Math.max.apply(null, vals.concat([1]));
     var sum = vals.reduce(function (a, b) { return a + b; }, 0);
-
-    // 连续天数从今天往回数：今天没录就断在今天（不算「还在连续」）
-    var streak = 0;
-    for (var i = days.length - 1; i >= 0; i--) {
-      if (vals[i] > 0) streak++; else break;
-    }
+    var a12 = ST.a12(streakFrom(vals));    // 门槛只在 stats.js 里定义，这里不写 14
 
     var bars = days.map(function (d, i) {
       var h = Math.round(vals[i] / max * 100);
@@ -242,44 +268,62 @@
     $('daily').innerHTML =
       '<div class="kpis" style="margin-bottom:16px">'
       + '<div class="kpi"><b>' + sum + '</b><span>近 ' + DAYS + ' 天录入</span></div>'
-      + '<div class="kpi' + (streak >= 14 ? ' pass' : '') + '"><b>' + streak + '</b><span>连续录入天数（目标 14）</span></div>'
+      + '<div class="kpi' + (a12.ok ? ' pass' : '') + '"><b>' + a12.n + '</b>'
+      + '<span>连续录入天数（目标 ' + a12.need + '）</span></div>'
       + '<div class="kpi"><b>' + state.items.length + '</b><span>库内总数</span></div>'
       + '</div>'
-      + '<div class="bars">' + bars + '</div><div class="axis">' + axis + '</div>';
+      + '<div class="bars">' + bars + '</div><div class="axis">' + axis + '</div>'
+      + (a12.ok ? '' : '<div class="why" style="margin:10px 0 0">距「连续 ' + a12.need + ' 天」还差 <b>'
+          + (a12.need - a12.n) + ' 天</b>：A12 要的是不断档，中间断一天就从头数。</div>');
   }
 
   /* ---------- 2. AI 字段修改率（A2） ---------- */
 
   function renderDiff() {
-    var s = D.summary(state.items);
+    var a2 = ST.a2(state.items, D);       // 样本窗口（前 50）+ 门槛都在里面定好了
+    var s = a2.summary;
 
-    if (!s.withRaw) {
+    // 一条 AI 原值都没有：这不是「样本不足」，是「还没有可比的样本」，要说清原因，
+    // 否则会被读成「功能坏了」。
+    if (!s.withRawAll) {
       $('diff').innerHTML = '<div class="kpis"><div class="kpi empty"><b>还没有样本</b>'
-        + '<span>库内 ' + s.total + ' 条素材，其中 ' + s.withoutRaw + ' 条早于「记录 AI 原值」上线，没有可比的原值。'
-        + '新收一条就有数据了。</span></div></div>';
+        + '<span>库内 ' + s.total + ' 条素材，都早于「记录 AI 原值」上线，没有可比的原值。新收一条就有数据了。</span></div></div>';
+      return;
+    }
+
+    // 门槛以下：**不出现任何百分比**（含字段级表格），只报还差多少。
+    // 「分母 3」和「分母 50」的读法完全不同；先给一个百分比就等于先给了结论，
+    // 而这时候并没有结论。
+    if (!a2.ok) {
+      $('diff').innerHTML =
+        '<div class="kpis"><div class="kpi empty"><b>' + esc(a2.text) + '</b>'
+        + '<span>AI 标签可用率（目标 ≥ 70%）—— 样本不足时不显示百分比</span></div></div>'
+        + progress(a2.n, a2.need)
+        + '<div class="why" style="margin:8px 0 0">有 AI 原值的样本 <b>' + a2.n + ' / ' + a2.need + '</b>。'
+        + 'A2 的判据是「前 50 条」，不到就该明说还差多少，而不是先给一个会误导人的数字。</div>'
+        + (s.withoutRaw
+            ? '<div class="why" style="margin:10px 0 0">另有 ' + s.withoutRaw + ' 条早于「记录 AI 原值」上线，'
+              + '没有可比的原值，<b>本来也不进分母</b>。</div>'
+            : '');
       return;
     }
 
     var order = ['category', 'platform', 'tags', 'title', 'summary', 'caption', 'ocr_text'];
     var rows = order.filter(function (k) { return s.byField[k]; }).map(function (k) {
       var f = s.byField[k];
-      var rate = f.changed / f.total;
-      var keep = 1 - rate;                       // 「没被改」= 可直接用的比例
+      var keep = 1 - f.changed / f.total;             // 「没被改」= 可直接用的比例
       return '<tr><td>' + esc(f.label) + '</td>'
         + '<td class="num">' + f.changed + ' / ' + f.total + '</td>'
         + '<td class="num ' + (keep >= 0.7 ? 'ok' : 'no') + '">' + pct(keep) + '</td>'
         + '<td style="width:34%"><div class="track"><i style="width:' + Math.round(keep * 100) + '%"></i></div></td></tr>';
     }).join('');
 
-    var tags = s.byField.tags;
-    var tagsKeep = tags ? 1 - tags.changed / tags.total : null;
-
     $('diff').innerHTML =
       '<div class="kpis" style="margin-bottom:16px">'
-      + '<div class="kpi ' + (tagsKeep == null ? 'empty' : (tagsKeep >= 0.7 ? 'pass' : 'warn')) + '">'
-      + '<b>' + (tagsKeep == null ? '没有数据' : pct(tagsKeep)) + '</b>'
+      + '<div class="kpi ' + (a2.rate != null && a2.rate >= 0.7 ? 'pass' : 'warn') + '">'
+      + '<b>' + (a2.rate == null ? '没有数据' : pct(a2.rate)) + '</b>'
       + '<span>AI 标签可用率（目标 ≥ 70%）</span></div>'
-      + '<div class="kpi"><b>' + s.withRaw + '</b><span>有 AI 原值的样本</span></div>'
+      + '<div class="kpi"><b>' + s.withRaw + '</b><span>进分母的样本（最早 ' + a2.need + ' 条）</span></div>'
       + '<div class="kpi"><b>' + s.anyChanged + ' / ' + s.withRaw + '</b><span>至少改过一处的条数</span></div>'
       + '</div>'
       + '<table class="rtab"><thead><tr><th>字段</th><th>改过</th><th>没被改（可用率）</th><th>　</th></tr></thead>'
@@ -288,9 +332,9 @@
           ? '<div class="why" style="margin:14px 0 0">还有 ' + s.withoutRaw + ' 条没有 AI 原值（早于该功能上线），'
             + '<b>不计入上面任何一行</b> —— 把它们算进来的话，分母是假的，百分比也就没有意义。</div>'
           : '')
-      + (s.withRaw < 10
-          ? '<div class="why" style="margin:10px 0 0"><b>样本只有 ' + s.withRaw + ' 条，这些百分比还不构成结论。</b>'
-            + 'A2 说的是「前 50 条」，现在只当趋势看。</div>'
+      + (s.withRawAll > s.withRaw
+          ? '<div class="why" style="margin:10px 0 0">库内共有 ' + s.withRawAll + ' 条有 AI 原值，这里只取'
+            + '<b>最早 ' + s.withRaw + ' 条</b> —— A2 的口径是「前 50 条」，不是「全部」。</div>'
           : '');
   }
 
@@ -298,38 +342,59 @@
 
   function renderSearch() {
     var ev = state.events;
-    var clicks = ev.filter(function (e) { return e.name === 'search_result_click'; });
-    var searches = ev.filter(function (e) { return e.name === 'search_execute'; });
-    var zeros = ev.filter(function (e) { return e.name === 'search_zero_result'; });
+    var attempts = ev.filter(function (e) { return e.name === 'search_attempt_end'; }).sort(byAt);
+    var a = ST.a4(attempts);
 
-    var ms = clicks.map(function (e) { return Number(e.props && e.props.ms) || 0; }).filter(function (x) { return x > 0; });
-    var within = ms.filter(function (x) { return x <= 10000; }).length;
-    var rate = ms.length ? within / ms.length : null;
+    var nE6 = ev.filter(function (e) { return e.name === 'search_execute'; }).length;
+    var nE7 = ev.filter(function (e) { return e.name === 'search_result_click'; }).length;
+    var nZero = ev.filter(function (e) { return e.name === 'search_zero_result'; }).length;
 
-    if (!searches.length) {
-      $('search').innerHTML = '<div class="kpis"><div class="kpi empty"><b>还没有搜索记录</b>'
-        + '<span>在灵感库里搜索或点一下抽屉/标签，这里就开始计了。</span></div></div>';
+    // 一次检索都没结算过。要分两种情况说 —— 混在一起会被误读成「从来没搜过」。
+    if (!a.n) {
+      $('search').innerHTML = nE6
+        ? '<div class="kpis"><div class="kpi empty"><b>还不能算</b>'
+          + '<span>窗口内有 ' + nE6 + ' 条旧的搜索记录，但它们来自改版前的埋点 —— 只记了「发起搜索」和'
+          + '「点开后过了多久」两件不相干的事，配不成对，无法判断哪些检索最终没找到。'
+          + '现在再搜一次，就会开始记结算事件。</span></div></div>'
+        : '<div class="kpis"><div class="kpi empty"><b>还没有搜索记录</b>'
+          + '<span>在灵感库里搜索或点一下抽屉/标签，这里就开始计了。</span></div></div>';
       return;
     }
 
-    $('search').innerHTML =
-      '<div class="kpis" style="margin-bottom:16px">'
-      + '<div class="kpi ' + (rate == null ? 'empty' : (rate >= 0.8 ? 'pass' : 'warn')) + '">'
-      + '<b>' + (rate == null ? '没有配对' : pct(rate)) + '</b>'
-      + '<span>10 秒内点开的比例（目标 ≥ 80%）</span></div>'
-      + '<div class="kpi"><b>' + (ms.length ? sec(median(ms)) : '—') + '</b><span>中位耗时</span></div>'
-      + '<div class="kpi"><b>' + (ms.length ? sec(mean(ms)) : '—') + '</b><span>平均耗时</span></div>'
+    var rows = [
+      ['found', a.found, '10 秒内点开了结果（算成功）'],
+      ['timeout', a.timeout, '点开了，但超过 10 秒（算失败）'],
+      ['abandoned', a.abandoned, '没点开就又搜了 / 清空筛选 / 离开页面（算失败）']
+    ];
+    if (a.other) rows.push(['other', a.other, '缺 outcome 或耗时异常，一律算失败']);
+
+    var table = '<table class="rtab"><thead><tr><th>这次检索的结果</th><th>次数</th><th>含义</th></tr></thead><tbody>'
+      + rows.map(function (r) {
+          return '<tr><td>' + r[0] + '</td><td class="num">' + r[1] + '</td><td>' + na(r[2]) + '</td></tr>';
+        }).join('')
+      + '</tbody></table>';
+
+    // 门槛以上才给比例与耗时。门槛以下只给次数（次数是事实，比例才是结论）。
+    var head = a.ok
+      ? '<div class="kpis" style="margin-bottom:16px">'
+        + '<div class="kpi ' + (a.rate >= 0.8 ? 'pass' : 'warn') + '"><b>' + pct(a.rate) + '</b>'
+        + '<span>10 秒内找到的比例（目标 ≥ 80%）</span></div>'
+        + '<div class="kpi"><b>' + (a.medianMs == null ? '—' : sec(a.medianMs)) + '</b><span>成功那些的中位耗时</span></div>'
+        + '<div class="kpi"><b>' + (a.meanMs == null ? '—' : sec(a.meanMs)) + '</b><span>点开过的平均耗时</span></div>'
+        + '</div>'
+      : '<div class="kpis" style="margin-bottom:16px"><div class="kpi empty"><b>' + esc(a.text) + '</b>'
+        + '<span>10 秒内找到的比例（目标 ≥ 80%）—— 样本不足时不显示比例与耗时</span></div></div>'
+        + progress(a.n, a.need);
+
+    $('search').innerHTML = head + table
+      + '<div class="why" style="margin:12px 0 0">'
+      + '分母是<b>发起的检索次数</b>，包含发起后没点开的那些（abandoned）。'
+      + '只对「点开过的」算比例，会系统性地把找回成功率算高 —— 那正是改版前的问题。'
       + '</div>'
-      + '<table class="rtab"><tbody>'
-      + '<tr><td>执行搜索 / 筛选</td><td class="num">' + searches.length + ' 次</td>'
-      + '<td>' + na('其中 ' + zeros.length + ' 次没有结果') + '</td></tr>'
-      + '<tr><td>点开结果</td><td class="num">' + clicks.length + ' 次</td>'
-      + '<td>' + na('配对上的 ' + ms.length + ' 次') + '</td></tr>'
-      + '</tbody></table>'
-      + (ms.length < 10
-          ? '<div class="why" style="margin:10px 0 0"><b>配对只有 ' + ms.length + ' 次。</b>A4 说的是「10 次检索」，'
-            + '样本不足时这个比例波动会很大。</div>'
-          : '');
+      + '<div class="why" style="margin:8px 0 0">旁证（同一窗口）：'
+      + '「执行搜索」<b>' + nE6 + '</b> 次、「点开结果」<b>' + nE7 + '</b> 次、无结果 <b>' + nZero + '</b> 次。'
+      + '「执行搜索」与结算数（' + a.n + '）的差，就是<b>离开页面时没能写进库</b>的那部分 —— '
+      + '浏览器会在卸载时取消未完成的写入，这是已知限制，不是 bug。</div>';
   }
 
   /* ---------- 4. 兜底抽屉占比（A11 / A13） ---------- */
@@ -341,10 +406,10 @@
         + '<span>收进几条之后这里会显示兜底抽屉的占比。</span></div></div>';
       return;
     }
-    var n = state.items.filter(function (it) { return it.category === fb.name; }).length;
-    var rate = n / state.items.length;
+    var f = ST.fallback(state.items, fb.name);
 
-    // 按抽屉列一遍，顺便看分布 —— 只有兜底占比的话，看不出该往哪儿挪
+    // 按抽屉列一遍，顺便看分布 —— 只有兜底占比的话，看不出该往哪儿挪。
+    // 占比只在到门槛之后才给：拿 3 条估占比和拿 3 条估均值是同一个错。
     var byCat = {};
     state.items.forEach(function (it) {
       var k = it.category || '（未归类）';
@@ -353,19 +418,25 @@
     var rows = Object.keys(byCat).sort(function (a, b) { return byCat[b] - byCat[a]; }).map(function (k) {
       return '<tr><td>' + esc(k) + (k === fb.name ? ' <span class="na">（兜底）</span>' : '') + '</td>'
         + '<td class="num">' + byCat[k] + '</td>'
-        + '<td class="num">' + pct(byCat[k] / state.items.length) + '</td></tr>';
+        + (f.enough ? '<td class="num">' + pct(byCat[k] / f.n) + '</td>' : '')
+        + '</tr>';
     }).join('');
 
+    var head = f.enough
+      ? '<div class="kpi ' + (f.rate > 0.1 ? 'warn' : 'pass') + '"><b>' + pct(f.rate) + '</b>'
+        + '<span>落在「' + esc(fb.name) + '」的比例（超过 10% 就该调抽屉）</span></div>'
+      : '<div class="kpi empty"><b>' + esc(f.text) + '</b>'
+        + '<span>落在「' + esc(fb.name) + '」的比例 —— 样本不足时不显示占比</span></div>';
+
     $('fallback').innerHTML =
-      '<div class="kpis" style="margin-bottom:16px">'
-      + '<div class="kpi ' + (rate > 0.1 ? 'warn' : 'pass') + '"><b>' + pct(rate) + '</b>'
-      + '<span>落在「' + esc(fb.name) + '」的比例（超过 10% 就该调抽屉）</span></div>'
-      + '<div class="kpi"><b>' + n + ' / ' + state.items.length + '</b><span>条数</span></div>'
-      + '</div><table class="rtab"><tbody>' + rows + '</tbody></table>'
-      + (state.items.length < 30
-          ? '<div class="why" style="margin:10px 0 0"><b>库内只有 ' + state.items.length + ' 条。</b>'
-            + 'A13 要求「前 30 条完成后做一次抽屉复盘」，现在还没到复盘的时候。</div>'
-          : '');
+      '<div class="kpis" style="margin-bottom:16px">' + head
+      + '<div class="kpi"><b>' + f.hit + ' / ' + f.n + '</b><span>条数</span></div>'
+      + '</div>'
+      + '<table class="rtab"><thead><tr><th>抽屉</th><th>条数</th>'
+      + (f.enough ? '<th>占比</th>' : '') + '</tr></thead><tbody>' + rows + '</tbody></table>'
+      + (f.enough ? '' : progress(f.n, f.need)
+        + '<div class="why" style="margin:8px 0 0">' + esc(f.text)
+        + '：A13 要求「前 30 条完成后做一次抽屉复盘」，占比本身也不该拿几条素材来估。</div>');
   }
 
   /* ---------- 5. 封面人工兜底（E13） ---------- */
@@ -401,65 +472,58 @@
   /* ---------- 6. 验收进度 ---------- */
 
   function renderAccept() {
-    var items = state.items;
-    var ev = state.events;
+    var attempts = state.events.filter(function (e) { return e.name === 'search_attempt_end'; }).sort(byAt);
+    var a1 = ST.a1(state.a1Events);
+    var a2 = ST.a2(state.items, D);
+    var a4 = ST.a4(attempts);
+    var a12 = ST.a12(streakFrom(dailyCounts().vals));
+    var a13 = ST.a13(state.items);
 
-    // A1：录入耗时，取前 20 条
-    var fin = ev.filter(function (e) { return e.name === 'item_create_finish'; })
-      .map(function (e) { return Number(e.props && e.props.ms) || 0; })
-      .filter(function (x) { return x > 0; })
-      .slice(0, 20);
-    var a1 = fin.length ? mean(fin) : null;
-
-    // A2：标签可用率
-    var ds = D.summary(items);
-    var tg = ds.byField.tags;
-    var a2 = tg && tg.total ? 1 - tg.changed / tg.total : null;
-
-    // A4：10 秒内找到
-    var clicks = ev.filter(function (e) { return e.name === 'search_result_click'; })
-      .map(function (e) { return Number(e.props && e.props.ms) || 0; })
-      .filter(function (x) { return x > 0; });
-    var a4 = clicks.length ? clicks.filter(function (x) { return x <= 10000; }).length / clicks.length : null;
-
-    // A12：连续录入天数
-    var days = lastDays(DAYS);
-    var cnt = {};
-    days.forEach(function (d) { cnt[d] = 0; });
-    items.forEach(function (it) { var k = dayKey(it.created_at); if (cnt[k] !== undefined) cnt[k]++; });
-    var streak = 0;
-    for (var i = days.length - 1; i >= 0; i--) { if (cnt[days[i]] > 0) streak++; else break; }
-
-    function verdict(ok, sample, need) {
-      if (sample < need) return '<span class="na">样本不足（' + sample + ' / ' + need + '）</span>';
+    // 门槛与「样本不足」的措辞都来自 stats.js —— 这里不再出现 20 / 50 / 10 / 30。
+    function verdict(ok, n, need) {
+      if (n < need) return '<span class="na">' + esc(ST.gateText(n, need)) + '</span>';
       return ok ? '<span class="ok">达标</span>' : '<span class="no">未达标</span>';
     }
+
+    // 「当前」列只放事实，「判定」列才放门槛结论 —— 否则同一句话会在两列里出现两遍。
+    // A1/A2/A4 的当前值受门槛约束，是因为「均值」「百分比」本身就是结论；
+    // A13 的当前值只是一个条数，任何样本量下都成立。
+    var a1Now = !a1.n ? na('还没有记录')
+      : a1.ok ? esc(sec(a1.mean)) + '（' + a1.n + ' 条）' : na(a1.text);
+    var a2Now = !a2.n ? na('还没有样本')
+      : a2.ok ? esc(pct(a2.rate)) + '（' + a2.n + ' 条）' : na(a2.text);
+    var a4Now = !a4.n ? na('还没有结算记录')
+      : a4.ok ? esc(pct(a4.rate)) + '（' + a4.n + ' 次）' : na(a4.text);
+    var a13Now = esc(a13.n + ' 条');
 
     var rows = [
       {
         k: 'A1', what: '单条录入平均 ≤ 30 秒',
-        now: a1 == null ? na('还没有记录') : esc(sec(a1)) + '（' + fin.length + ' 条）',
-        v: verdict(a1 != null && a1 <= 30000, fin.length, 20)
+        now: a1Now,
+        v: verdict(a1.mean != null && a1.mean <= 30000, a1.n, a1.need)
       },
       {
         k: 'A2', what: 'AI 标签可用率 ≥ 70%',
-        now: a2 == null ? na('还没有样本') : esc(pct(a2)) + '（' + tg.total + ' 条）',
-        v: verdict(a2 != null && a2 >= 0.7, tg ? tg.total : 0, 50)
+        now: a2Now,
+        v: verdict(a2.rate != null && a2.rate >= 0.7, a2.n, a2.need)
       },
       {
         k: 'A4', what: '10 次检索里 ≥ 8 次在 10 秒内找到',
-        now: a4 == null ? na('还没有配对') : esc(pct(a4)) + '（' + clicks.length + ' 次）',
-        v: verdict(a4 != null && a4 >= 0.8, clicks.length, 10)
+        now: a4Now,
+        v: verdict(a4.rate != null && a4.rate >= 0.8, a4.n, a4.need)
       },
       {
         k: 'A12', what: '连续 2 周保持录入',
-        now: esc(streak + ' 天'),
-        v: verdict(streak >= 14, streak, 14)
+        now: esc(a12.n + ' 天'),
+        v: verdict(a12.ok, a12.n, a12.need)
       },
       {
         k: 'A13', what: '前 30 条完成一次抽屉与标签复盘',
-        now: esc(items.length + ' 条'),
-        v: verdict(false, items.length, 30)
+        now: a13Now,
+        // 素材够 30 条只说明「可以复盘了」。数据页读不到 docs/构建记录.md，
+        // 判不了「复盘做过没有」，所以给第三种状态，不假装知道。
+        v: a13.enough ? '<span class="wait">待人工复盘</span>'
+                      : '<span class="na">' + esc(a13.text) + '</span>'
       }
     ];
 
@@ -470,7 +534,9 @@
         }).join('') + '</tbody></table>'
       + '<div class="why" style="margin:14px 0 0">'
       + '「样本不足」是刻意的门槛：分母太小的时候百分比没有意义，'
-      + '与其显示一个会误导人的数字，不如明说还差多少条。'
+      + '与其显示一个会误导人的数字，不如明说还差多少。<br>'
+      + 'A13 那行不是「达标 / 未达标」—— 素材数够 30 只说明<b>可以复盘了</b>，不等于复盘做过了。'
+      + '复盘结论以 <code>docs/构建记录.md</code> 为准，这一页判不了。'
       + '</div>';
   }
 

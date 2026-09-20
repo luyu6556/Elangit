@@ -54,9 +54,18 @@
   // 把样本量一并返回，是因为分母 3 和分母 50 的读法完全不同 —— A2 那条
   // 「≥70%」在 3 个样本上毫无意义。报表必须自己说清自己站在多少样本上，
   // 不能只吐一个百分比让人误读。
-  function summary(items) {
+  //
+  // opts.firstN（2026-09-20 新增）：PRD A2 的判据是「**前 50 条**」，不是「全部」。
+  // 传入 firstN 时，先取最早的 N 个**有原值**的样本再聚合。
+  // 注意 total / withoutRaw 仍按**传入的全量**算：它们回答的是「库里一共多少条、
+  // 其中多少条没有原值」，若也缩到 N 条，那句「还有 N 条旧素材没有原值」就变成错的。
+  // 取「最早 N 个有原值的」而不是「前 N 条里挑有原值的」：后者在有旧素材混入时
+  // 样本数会不足 N，A2 的分母就随旧素材数量漂移了。
+  function summary(items, opts) {
     var all = items || [];
-    var withRaw = all.filter(function (it) { return !!it.ai_raw; });
+    var withRawAll = all.filter(function (it) { return !!it.ai_raw; });
+    var firstN = opts && opts.firstN;
+    var withRaw = firstN ? withRawAll.slice(0, firstN) : withRawAll;
     var byField = {};
 
     withRaw.forEach(function (it) {
@@ -70,7 +79,9 @@
     return {
       total: all.length,
       withRaw: withRaw.length,
-      withoutRaw: all.length - withRaw.length,
+      withRawAll: withRawAll.length,
+      withoutRaw: all.length - withRawAll.length,
+      firstN: firstN || null,
       anyChanged: withRaw.filter(function (it) { return changed(it).length > 0; }).length,
       byField: byField
     };

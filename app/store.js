@@ -284,10 +284,32 @@
       .then(function (r) { unwrap(r, '读埋点'); return r.data || []; });
   }
 
+  // 取某个事件**最早**的 N 条（2026-09-20 新增，为修正 A1 的样本窗口）。
+  //
+  // 为什么必须单独一个方法、不能在 loadEvents 的结果上截取：
+  // loadEvents 有两个硬限制——只看最近 60 天、最多 2000 条——而且是**倒序**返回。
+  // 在它上面 slice(0, 20) 拿到的是「最近 60 天内最新的 20 条」，不是 PRD 要的
+  // 「最早的 20 条」。样本窗口是**查询的属性**，不能在渲染层补救：
+  // 一旦顺序或窗口错了，均值就是另一个数，而且看不出错。
+  function loadFirstEvents(name, limit) {
+    return cloud.database.from('events').select('name,at,props')
+      .eq('name', name)
+      .order('at', { ascending: true })
+      .limit(limit || 20)
+      .then(function (r) { unwrap(r, '读埋点（最早）'); return r.data || []; });
+  }
+
   // 报表用的素材全量：只取算指标要的列，**不带图片**。
   // ai_raw 必须带上——F2-8 的差异、E4/E11/E12 的派生全靠它。
+  //
+  // ⚠️ ai_summary / ai_caption / ocr_text 也必须带上（2026-09-20 修正）：
+  // diff.fields() 拿它们跟 ai_raw 里的原值对比，而这三个字段正是 A2 字段表的三行。
+  // 少了它们，after 恒为空字符串 —— 于是「只要 AI 出过这段文字就算被改过」，
+  // 可用率恒为 0%。不报错、但数字全错，是最难被发现的那种 bug。
+  // 这三列只有数据页要用（列表页走 ITEM_COLS），加在这里不影响别处。
   var REPORT_COLS = [
-    'id', 'category', 'ai_title', 'ai_tags', 'my_tags', 'source_platform',
+    'id', 'category', 'ai_title', 'ai_summary', 'ai_caption', 'ocr_text',
+    'ai_tags', 'my_tags', 'source_platform',
     'cover_source', 'cover_index', 'status', 'created_at', 'ai_raw'
   ].join(',');
 
@@ -341,6 +363,7 @@
     fetchItemByShareToken: fetchItemByShareToken,
     insertEvent: insertEvent,
     loadEvents: loadEvents,
+    loadFirstEvents: loadFirstEvents,
     reportItems: reportItems,
     newShareToken: newShareToken,
     toDataUrl: toDataUrl

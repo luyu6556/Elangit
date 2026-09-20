@@ -134,7 +134,7 @@
     renderGrid();
   }
 
-  /* ---------- 埋点：E6 / E7 / E8 ---------- */
+  /* ---------- 埋点：E6 / E7 / E8 / E14 ---------- */
 
   // 只在**用户动作**之后记，初始化那次不记——否则每次打开页面都会多出一条
   // 「搜索」，报表里的搜索次数就没意义了。所以不是挂在 applyFilter 里，
@@ -142,14 +142,19 @@
   function trackSearch(kind) {
     var filtering = !!(state.q || state.tags.length || state.cat !== '全部');
     var n = state.filtered.length;
-    T.event('search_execute', {
+    var cond = {
       kind: kind, q: state.q, cat: state.cat, tags: state.tags.slice(),
       n: n, total: state.index.length, filtered: filtering
-    });
-    // 记下刻点，供 E7 算「从搜索到点击」的耗时（A4 的判据）。没搜过就不记 E7。
-    T.markSearch();
+    };
+    // 先开一笔检索，再把 search_id 写进 E6 —— 同一个 id 让库里的
+    // E6（发起）/ E7（点开）/ E14（结算）能串成一次完整的检索来回溯。
+    // beginSearch 内部会把上一笔还没结算的检索记成 abandoned（A4 的分母靠它）。
+    var searchId = T.beginSearch(cond);
+    T.event('search_execute', Object.assign({ search_id: searchId }, cond));
     if (!n && filtering) {
-      T.event('search_zero_result', { q: state.q, cat: state.cat, tags: state.tags.slice() });
+      T.event('search_zero_result', {
+        search_id: searchId, q: state.q, cat: state.cat, tags: state.tags.slice()
+      });
     }
   }
 
@@ -245,7 +250,9 @@
     state._qTracked = '';
     $('q').value = '';
     applyFilter();
-    // 清空筛选不算「搜索」——它不是找东西，而是放弃找。记了会让搜索次数虚高。
+    // 清空筛选不记 E6 —— 它不是找东西，而是放弃找，记了会让搜索次数虚高。
+    // 但它**确实结算了一次检索**：如果上一笔还没点开结果，那就是没找到。
+    T.abandonSearch();
   }
 
   // E7 必须在跳转**之前**写完：埋点是 fetch，页面一导航请求就被取消，写不完就永远丢了——
@@ -275,15 +282,23 @@
       if (act === 'open') {
         var id = Number(el.getAttribute('data-id'));
         var href = 'item.html?id=' + id;
-        // E7：从搜索/筛选到点开这条的耗时（A4：10 次检索里 ≥8 次能在 10 秒内找到）。
-        // 只记「进详情」这一种点击——「看原始截图」是扫一眼就走，不代表找到了目标，
-        // 混进来的话这个指标会被好看的数据稀释。
-        var since = T.sinceSearch();
-        if (!since) { location.href = href; return; }
-        goAfterLog(href, T.event('search_result_click', Object.assign({
-          item_id: id,
-          rank: state.filtered.findIndex(function (x) { return x.id === id; }) + 1
-        }, since)));
+        // A4：从发起检索到点开这一条的耗时。只认「进详情」这一种点击 ——
+        // 「看原始截图」是扫一眼就走，不代表找到了目标，混进来会把指标稀释得更好看。
+        var t = T.touchSearch();
+        if (!t) { location.href = href; return; }
+        var rank = state.filtered.findIndex(function (x) { return x.id === id; }) + 1;
+        // E14：结算这次检索（≤10s 记 found，否则 timeout）。**它才是 A4 的分母** ——
+        // 发起检索但始终没点开的那些，现在也会被记成 abandoned，不再凭空消失。
+        // 结算后这次检索就关闭了，所以同一笔里再点第二张卡片不会重复计数。
+        var settleP = T.resolveSearch({ item_id: id, rank: rank });
+        // E7 语义不变（点开了什么、耗时多少），只是把 search_seq 换成 search_id，
+        // 好在库里和 E6 / E14 对上。
+        goAfterLog(href, Promise.all([
+          settleP,
+          T.event('search_result_click', {
+            item_id: id, rank: rank, search_id: t.search_id, ms: t.ms
+          })
+        ]));
         return;
       }
       if (act === 'reset') { clearFilters(); return; }
