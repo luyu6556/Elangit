@@ -130,10 +130,23 @@
   var T = window.Elangit.track;
   var $ = function (id) { return document.getElementById(id); };
 
-  // E1 的起点，也是 E5「总耗时」的起点（A1 判据：从打开录入页到入库 ≤ 30 秒）。
-  // 用模块初始化时刻而不是 setTimeout(0) 之后——那点差在 30 秒的量级上无所谓，
-  // 但「打开录入页」这个语义就该是脚本开始跑的那一刻。
+  // E1 的起点。**不再是 A1 的起点**（2026-09-21 改，见构建记录 #025）。
+  //
+  // 原来的 E5 用的是 pageOpenedAt，也就是「从打开录入页到入库」的累计值。
+  // 一次会话连录 N 条时，第 N 条会把前面 N-1 条的处理时间和中间浏览的时间
+  // 全算进去 —— 首次真实录入实测：16 条连录得到 27.8s → 45.5s **单调递增、
+  // 每条 +1.2 秒**，均值 36.6 秒（16 条全超 30 秒判据），而真实提交只花
+  // 200–402ms，**差两个数量级**。数字看着合理，所以之前没人怀疑它。
   var pageOpenedAt = Date.now();
+
+  // 本条素材的计时起点：**本条的第一个输入动作**。
+  // A1 问的是「灵感出现时能不能 30 秒内收进来」，那该量的是这一条花了多久，
+  // 与页面已经开了多久无关。clearForm() 后重置，下一条重新起算。
+  var itemStartedAt = null;
+  function markItemStart() {
+    if (itemStartedAt) return;       // 只认第一个动作，后续输入不重置
+    itemStartedAt = Date.now();
+  }
 
   var state = {
     taxonomy: null,
@@ -170,9 +183,19 @@
     state.picked.forEach(function (p) { if (p.previewUrl) URL.revokeObjectURL(p.previewUrl); });
     state.picked = [];
     state.coverIndex = 0;
+    // 计时起点一并归零：清零是「这一条结束了」的标志，
+    // 下一条的第一个输入动作会重新起算（P0-1 的修正）。
+    itemStartedAt = null;
     $('fText').value = ''; $('fUrl').value = ''; $('fNote').value = ''; $('fPlat').value = '';
     renderPicks();
   }
+
+  // 输入动作 = 计时起点。四类入口都要接上，漏一个就会出现「这一条明明是我
+  // 手打的、却按页面打开时刻起算」的脏样本，而脏样本看起来也是合法数字。
+  ['fText', 'fUrl', 'fNote'].forEach(function (id) {
+    $(id).addEventListener('input', markItemStart);
+  });
+  $('fPlat').addEventListener('change', markItemStart);
 
   function showFormErr(msg) {
     var el = $('formErr');
@@ -184,6 +207,7 @@
   /* ---------- 图片选入（本地先跑管线，不碰网络） ---------- */
 
   function addFiles(files) {
+    markItemStart();          // 粘贴/拖拽/点选本身就是本条的第一个动作
     var list = Array.prototype.slice.call(files).filter(function (f) {
       return f && f.type && f.type.indexOf('image/') === 0;
     });
@@ -217,6 +241,7 @@
   $('picks').addEventListener('click', function (e) {
     var t = e.target.closest('.pick');
     if (!t) return;
+    markItemStart();
     var i = Number(t.getAttribute('data-i'));
     var act = e.target.getAttribute('data-act');
     if (act === 'rm') {
@@ -238,6 +263,8 @@
       ev.preventDefault();
       addFiles(got.files);
     } else if (got.text && !$('fText').value) {
+      // 程序赋值不会触发 input 事件，所以要显式起算
+      markItemStart();
       $('fText').value = got.text;
       toast('已接收粘贴的文本');
     }
@@ -255,6 +282,52 @@
   $('drop').addEventListener('drop', function (e) {
     if (e.dataTransfer && e.dataTransfer.files) addFiles(e.dataTransfer.files);
   });
+
+  /* ---------- 抓原文（网页标题 / 描述 / 首图，2026-09-21 新增） ---------- */
+
+  // 走自己的服务端，不是浏览器直连对方站：对方站（实测 gooood）不发 CORS 头，
+  // 浏览器直接 fetch 既拿不到 HTML、也拿不到图片**字节**，而「取字节 → canvas
+  // 缩到 400px」必须同源，否则 canvas 被污染、toDataURL 直接抛异常。
+  // 端点 /api/meta 与 /api/img 的实现和防护写在 _page_meta.py 顶部。
+  //
+  // 两条都必须**可失败**：抓不到就当作没有，绝不让它挡住入库。
+  // 超时也自己管——服务端有 12 秒总预算，这里 9 秒就放弃，免得按钮一直转。
+  var META_TIMEOUT_MS = 9000;
+
+  function apiGet(url, ms, asJson) {
+    var ctrl = new AbortController();
+    var timer = setTimeout(function () { ctrl.abort(); }, ms);
+    return fetch(url, { signal: ctrl.signal })
+      .then(function (r) { return r.ok ? (asJson ? r.json() : r.blob()) : null; })
+      .catch(function () { return null; })
+      .then(function (v) { clearTimeout(timer); return v; });
+  }
+
+  function fetchPageMeta(url) {
+    return apiGet('/api/meta?u=' + encodeURIComponent(url), META_TIMEOUT_MS, true)
+      .then(function (j) {
+        // 「服务端不在」与「抓取失败」在这里是同一种降级：平台若跑不了服务端，
+        // 请求会拿到 404 的 HTML，r.ok 是 false，上面已经折成 null。
+        if (j && j.ok && (j.title || j.image)) return j;
+        if (j && !j.ok) toast('原文信息没取到（' + (j.error || '原因未知') + '），照常入库');
+        return null;
+      });
+  }
+
+  // 首图是「别人的图」：直接 <img src> 会受防盗链与混合内容影响，而且要去 canvas
+  // 里缩放就**必须同源**。所以经 /api/img 取回字节，再复用录入截图那条管线出
+  // 400px 缩略图 —— 封面因此与截图封面完全同构（同样把 base64 存进 items.cover_thumb），
+  // 列表页的取数口径不用改，分享出去也不依赖对方站还活着。
+  function fetchRemoteCover(imageUrl) {
+    return apiGet('/api/img?u=' + encodeURIComponent(imageUrl), META_TIMEOUT_MS, false)
+      .then(function (blob) {
+        if (!blob) throw new Error('没取到图片数据');
+        return IMG.processRaw(blob);
+      })
+      .then(function (raw) { return IMG.makeCover(raw, null); })
+      .then(function (c) { return { thumb: c.thumb, coverSource: c.thumb ? 'link' : null }; })
+      .catch(function () { return { thumb: null, coverSource: null }; });   // 降级：没有封面
+  }
 
   /* ---------- 提交：本地入库 → 再排队跑 AI ---------- */
 
@@ -310,68 +383,112 @@
 
     var coverRaw = state.picked.length ? state.picked[state.coverIndex].raw : null;
     var t0 = Date.now();
+    // 本条真正的计时起点，**在这里就冻结**。
+    // 不在 E5 那里读 itemStartedAt，有两个原因：
+    //   1. 下面的 clearForm() 会把它清零，而 E5 是等原件写完才异步发的
+    //      （线上实测踩到：读到 null → ms 全空、ms_from 全成了 'page'）；
+    //   2. 只要依赖「读的时机」，以后每次在 clearForm 之前插新逻辑都要重想一遍。
+    // 冻结成一个局部量之后，这段代码就不再关心谁在什么时候清零了。
+    var itemStart = itemStartedAt;
+    // 只要填了网址、又没有本地图，就去取一次原文信息。
+    // 判据是「有没有本地图」而不是「是不是只填了网址」：粘贴了文本又贴链接时
+    // 同样没有封面，而文本并不能当封面用（首版只按 onlyUrl 判，会漏掉这一类）。
+    var wantMeta = !coverRaw && !!url;
+    if (wantMeta) $('btnSubmit').textContent = '正在取原文信息…';
 
-    // 本地出图（纯浏览器运算，不碰网络）
-    var thumbJob = coverRaw
-      ? IMG.makeCover(coverRaw, null)   // 先整图作封面，AI 给了矩形再重裁
-      : Promise.resolve({ thumb: null, coverSource: null });
+    // 去服务端取网页的标题 / 描述 / 首图（PRD F1-5，2026-09-21 新增）。
+    // 为什么必须等它回来再入库：封面要和素材**同一次写入**。否则卡片会先渲染成
+    // 一个没图的灰块、之后再跳一下——那正是 P1-1 报上来的观感。
+    // 抓不到不是错误：降级成「没有封面」，录入照常完成（对方站挂了、或平台
+    // 跑不了服务端，都不该挡住入库）。
+    var metaJob = wantMeta ? fetchPageMeta(url) : Promise.resolve(null);
 
-    thumbJob.then(function (c) {
-      var coverMs = Date.now() - t0;
-      var tWrite = Date.now();
-      var sourceType = (state.picked.length && (text || url)) ? 'mixed'
-        : (state.picked.length ? 'image' : 'text');
-      var images = state.picked.map(function (p) { return p.raw; });
-      return S.createItem({
-        source_type: sourceType,
-        raw_text: text || null,
-        source_url: url || null,
-        source_platform: plat || null,
-        my_note: note || null,
-        category: cfg.fallbackCategory,
-        cover_thumb: c.thumb ? c.thumb.base64 : null,
-        // cover_source 是 NOT NULL 列。纯文本素材没有封面，必须显式给 'none'——
-        // 之前这里传 null，导致「只填文本、不传图」这条 F1-1/F3-2 的路径直接写库失败。
-        cover_source: c.thumb ? 'raw' : 'none',
-        cover_index: state.coverIndex,
-        status: 'pending'
-      }).then(function (item) {
-        var writeMs = Date.now() - tWrite;
-        // 先把卡片放出来，不等图片写完——素材这一刻已经存在了，
-        // 这就是 F1-4「本地 ≤1 秒出图入库」要的效果。
-        if (coverRaw) state.raws[item.id] = { cover: coverRaw };
-        item._coverMs = coverMs;
-        item._writeMs = writeMs;
-        item._startedAt = Date.now();
-        state.items.unshift(item);
-        renderList();
-        clearForm();
-        submitting = false;
-        $('btnSubmit').disabled = false;
-        $('btnSubmit').textContent = '收进灵感库';
+    metaJob.then(function (meta) {
+      // 用户自己选的封面最准，有本地图就优先本地图；没有才用抓来的首图。
+      var coverJob;
+      if (coverRaw) {
+        coverJob = IMG.makeCover(coverRaw, null)      // 先整图，AI 给了矩形再重裁
+          .then(function (c) { return { thumb: c.thumb, coverSource: c.thumb ? 'raw' : null }; });
+      } else if (meta && meta.image) {
+        coverJob = fetchRemoteCover(meta.image);
+      } else {
+        coverJob = Promise.resolve({ thumb: null, coverSource: null });
+      }
 
-        // 1600px 原件随后写入；AI 排在它后面，保证 AI 要用时图肯定在库里
-        var imgJob = images.length
-          ? S.addImages(item.id, images).catch(function (e) {
-              toast('原件写入失败：' + fmtErr(e));
-            })
-          : Promise.resolve();
+      return coverJob.then(function (c) {
+        var coverMs = Date.now() - t0;
+        var tWrite = Date.now();
+        // source_type：以前只有 image / mixed / text 三种，于是「只填网址」被
+        // 记成 'text'（P2-2）。链接既不是图也不是文本，补一个 'link'。
+        var sourceType = coverRaw ? ((text || url) ? 'mixed' : 'image')
+          : (url ? 'link' : 'text');
+        var images = state.picked.map(function (p) { return p.raw; });
+        return S.createItem({
+          source_type: sourceType,
+          raw_text: text || null,
+          source_url: url || null,
+          source_platform: plat || null,
+          my_note: note || null,
+          category: cfg.fallbackCategory,
+          cover_thumb: c.thumb ? c.thumb.base64 : null,
+          // cover_source 是 NOT NULL 列。四种取值：
+          //   'crop' 从截图裁出主体 / 'raw' 截图整图未裁 /
+          //   'link' 取自原文网页（2026-09-21 新增）/ 'none' 没有封面。
+          cover_source: c.coverSource || 'none',
+          cover_index: state.coverIndex,
+          // 抓到的网页标题与描述落库：AI 有真实文字才判得准（P1-3 那两条判错，
+          // 一部分原因就是模型只拿到一串 URL，而提示词还在催它「判不出就用兜底抽屉」）。
+          page_title: (meta && meta.title) || null,
+          page_desc: (meta && meta.desc) || null,
+          status: 'pending'
+        }).then(function (item) {
+          var writeMs = Date.now() - tWrite;
+          // 先把卡片放出来，不等图片写完——素材这一刻已经存在了，
+          // 这就是 F1-4「本地 ≤1 秒出图入库」要的效果。
+          if (coverRaw) state.raws[item.id] = { cover: coverRaw };
+          item._coverMs = coverMs;
+          item._writeMs = writeMs;
+          item._startedAt = Date.now();
+          state.items.unshift(item);
+          renderList();
+          clearForm();
+          submitting = false;
+          $('btnSubmit').disabled = false;
+          $('btnSubmit').textContent = '收进灵感库';
 
-        return imgJob.then(function () {
-          // E5：这条入库完成。**这是 A1 的判据**——从打开录入页到入库的总耗时。
-          // 刻意放在这里而不是「AI 跑完」那一刻：PRD F1-4 已经把 AI 改成异步补齐
-          // 且不计入阻塞时长，把 AI 算进来会让这个指标永远超 30 秒，也就失去意义。
-          T.event('item_create_finish', {
-            item_id: item.id,
-            ms: Date.now() - pageOpenedAt,
-            cover_ms: coverMs,
-            write_ms: writeMs,
-            images: images.length
+          // 1600px 原件随后写入；AI 排在它后面，保证 AI 要用时图肯定在库里
+          var imgJob = images.length
+            ? S.addImages(item.id, images).catch(function (e) {
+                toast('原件写入失败：' + fmtErr(e));
+              })
+            : Promise.resolve();
+
+          return imgJob.then(function () {
+            // E5：这条入库完成。**这是 A1 的判据**。刻意放在这里而不是「AI 跑完」
+            // 那一刻：PRD F1-4 已经把 AI 改成异步补齐且不计入阻塞时长。
+            //
+            // ms 的起点是**本条的第一个输入动作**（itemStart，提交入口处就冻结好了），
+            // 终点与原来一致：原件也写完的那一刻。只改起点、不动终点 ——
+            // 这条修正要解决的是起点，顺手改终点会让数字变成另一种口径。
+            // 拿不到起点时（提交前必然有输入，理论上到不了）不写 ms，
+            // 只标明这条属于旧口径：宁可少一个样本，也不混进一个不可比的数。
+            var now = Date.now();
+            T.event('item_create_finish', {
+              item_id: item.id,
+              ms: itemStart ? now - itemStart : null,
+              ms_from: itemStart ? 'input' : 'page',
+              page_ms: now - pageOpenedAt,
+              cover_ms: coverMs,
+              write_ms: writeMs,
+              images: images.length,
+              got_meta: meta ? 1 : 0
+            });
+            toast('已入库（出图 ' + coverMs + 'ms · 入库 ' + writeMs + 'ms）'
+              + (images.length ? '，' + images.length + ' 张原件已写' : '')
+              + (c.coverSource === 'link' ? '，封面取自原文' : '')
+              + '。AI 识别接着跑。');
+            enqueueAi(item.id);
           });
-          toast('已入库（出图 ' + coverMs + 'ms · 入库 ' + writeMs + 'ms）'
-            + (images.length ? '，' + images.length + ' 张原件已写' : '')
-            + '。AI 识别接着跑。');
-          enqueueAi(item.id);
         });
       });
     }).catch(function (e) {
@@ -421,6 +538,10 @@
           aiImage: aiImage,
           text: item.raw_text || '',
           url: item.source_url || '',
+          // 抓到的网页标题/描述：只填网址的素材，模型原来只能看到一串 URL，
+          // 分类判错多半出在这里。这两段是真实文字，比 slug 猜词可靠得多。
+          pageTitle: item.page_title || '',
+          pageDesc: item.page_desc || '',
           taxonomy: tax
         }).then(function (r) {
           patch.status = 'done';
@@ -574,7 +695,8 @@
       ? '<img src="' + S.toDataUrl('image/jpeg', it.cover_thumb) + '" data-act="shot">'
       : '';
     var coverNote = it.cover_source === 'crop' ? '封面：从截图裁出主体'
-      : (it.cover_source === 'raw' ? '封面：整图（未裁）' : '无图');
+      : (it.cover_source === 'raw' ? '封面：整图（未裁）'
+        : (it.cover_source === 'link' ? '封面：取自原文网页' : '无图'));
 
     var summary = it.ai_summary
       ? esc(it.ai_summary)

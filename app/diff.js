@@ -49,7 +49,7 @@
     return all ? all.filter(function (f) { return f.changed; }) : null;
   }
 
-  // 聚合：按字段算「改过的条数 / 有原值的条数」。
+  // 聚合：按字段算「改过的条数 / **AI 真的产出过这个字段**的条数」。
   //
   // 把样本量一并返回，是因为分母 3 和分母 50 的读法完全不同 —— A2 那条
   // 「≥70%」在 3 个样本上毫无意义。报表必须自己说清自己站在多少样本上，
@@ -57,10 +57,18 @@
   //
   // opts.firstN（2026-09-20 新增）：PRD A2 的判据是「**前 50 条**」，不是「全部」。
   // 传入 firstN 时，先取最早的 N 个**有原值**的样本再聚合。
-  // 注意 total / withoutRaw 仍按**传入的全量**算：它们回答的是「库里一共多少条、
+  // 注意 withoutRaw 仍按**传入的全量**算：它回答的是「库里一共多少条、
   // 其中多少条没有原值」，若也缩到 N 条，那句「还有 N 条旧素材没有原值」就变成错的。
   // 取「最早 N 个有原值的」而不是「前 N 条里挑有原值的」：后者在有旧素材混入时
   // 样本数会不足 N，A2 的分母就随旧素材数量漂移了。
+  //
+  // 分母的定义（2026-09-21 修正，P0-2）：**只算 AI 在该字段真的产出过非空内容的样本**。
+  // 原实现把「AI 返回空字符串」也算进分母，于是空值对空值判成 changed=false，
+  // 被计成「没被改过 = 可用」——「AI 什么都没给」被读成了「AI 给的东西可用」。
+  // 首次真实录入实测：16 条里一条图都没有、caption / ocr_text 全是空串，
+  // 而报表把这两个字段的可用率显示成 100%。这是**会自我实现的假通过**。
+  // 现在字段里同时给出 produced（进分母的）与 empty（AI 没产出的，不进分母），
+  // 让调用方能说出「这个 100% 是站在几个样本上」。
   function summary(items, opts) {
     var all = items || [];
     var withRawAll = all.filter(function (it) { return !!it.ai_raw; });
@@ -70,9 +78,13 @@
 
     withRaw.forEach(function (it) {
       fields(it).forEach(function (f) {
-        if (!byField[f.key]) byField[f.key] = { key: f.key, label: f.label, changed: 0, total: 0 };
-        byField[f.key].total++;
-        if (f.changed) byField[f.key].changed++;
+        if (!byField[f.key]) {
+          byField[f.key] = { key: f.key, label: f.label, changed: 0, kept: 0, produced: 0, empty: 0 };
+        }
+        var cell = byField[f.key];
+        if (f.before === '') { cell.empty++; return; }   // AI 没产出 → 不进这个字段的分母
+        cell.produced++;
+        if (f.changed) cell.changed++; else cell.kept++;
       });
     });
 

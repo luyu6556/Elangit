@@ -57,8 +57,18 @@
       lines.push('截图通常一侧是作品照片、一侧是白底文字面板，photo_rect 指照片占整图的百分比；整张图就是照片时给 0/0/100/100。');
     }
     if (opts.text) lines.push('【文本】' + opts.text.slice(0, 3000));
+    // 网页标题与描述来自服务端抓取（_page_meta.py，2026-09-21 新增）。
+    if (opts.pageTitle) lines.push('【网页标题】' + String(opts.pageTitle).slice(0, 200));
+    if (opts.pageDesc) lines.push('【网页描述】' + String(opts.pageDesc).slice(0, 500));
     if (opts.url) lines.push('【网址】' + opts.url);
-    if (!opts.text && !opts.hasImage) lines.push('【只有网址，判不出就用兜底抽屉】');
+    // 下面这句只在**真的什么都没有**时才给。
+    // 原来只要没有粘贴文本就会带上它 —— 于是「只填网址」这一类素材被提示词
+    // 主动推向兜底抽屉。首次真实录入实测：4 条落兜底里有 2 条属于「AI 判错」
+    // （P1-3，解忧小屋 / Wiedenhofer 本该进「建筑与构筑物」），而它们其实
+    // 是有 og:title / og:description 可用的，只是当时没抓。
+    if (!opts.text && !opts.pageTitle && !opts.pageDesc && !opts.hasImage) {
+      lines.push('【只有网址，判不出就用兜底抽屉】');
+    }
 
     return lines.join('\n');
   }
@@ -202,10 +212,12 @@
 
   /**
    * @param {Object} opts
-   *   aiImage  {base64, mime}  送模型的图（长边 1000，见 pipeline.makeAiInput）
-   *   text     用户粘贴的原文
-   *   url      来源网址
-   *   taxonomy {categories, tags}
+   *   aiImage   {base64, mime}  送模型的图（长边 1000，见 pipeline.makeAiInput）
+   *   text      用户粘贴的原文
+   *   url       来源网址
+   *   pageTitle 服务端抓来的网页标题（可能为空）
+   *   pageDesc  服务端抓来的网页描述（可能为空）
+   *   taxonomy  {categories, tags}
    * @returns Promise<{title, summary, caption, ocrText, category, categoryCorrected, tags, platform, rect, rawJson, ms, firstChunkMs}>
    */
   function analyze(opts) {
@@ -213,7 +225,10 @@
     var hasImage = !!(opts.aiImage && opts.aiImage.base64);
     return streamOnce(
       opts,
-      buildPrompt(taxonomy, { text: opts.text, url: opts.url, hasImage: hasImage }),
+      buildPrompt(taxonomy, {
+        text: opts.text, url: opts.url, hasImage: hasImage,
+        pageTitle: opts.pageTitle, pageDesc: opts.pageDesc
+      }),
       hasImage
     ).then(function (r) {
       var p = extractJson(r.text);

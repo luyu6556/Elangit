@@ -29,6 +29,10 @@
     'id', 'status', 'category', 'ai_title', 'ai_summary', 'ai_caption', 'ocr_text',
     'ai_tags', 'my_tags', 'raw_text', 'source_platform', 'source_url',
     'my_note', 'cover_thumb', 'cover_source', 'cover_index',
+    // page_title / page_desc：只填网址时服务端抓来的原文标题与描述（2026-09-21 新增）。
+    // 落库的理由不是「留个记录」，是**重跑 AI 时要能复用**：AI 排在入库之后异步跑，
+    // 页面刷新后 pending 的条目会重新排队，那时内存里已经没有抓取结果了。
+    'page_title', 'page_desc',
     // share_token 也带上：详情页要显示「这条分享出去了没有」，
     // 少了它就只能另发一次查询（任务 7）
     'share_token',
@@ -202,6 +206,10 @@
   var INDEX_COLS = [
     'id', 'status', 'category', 'ai_title', 'ai_tags', 'my_tags', 'ai_summary', 'ai_caption',
     'ocr_text', 'raw_text', 'my_note', 'source_platform', 'source_url',
+    // page_title 进索引是为了让「搜工作室名 / 项目原名」有效——存链接进来的素材，
+    // 原文标题里往往有 AI 收敛后丢掉的信息（作者、地点）。page_desc 不进：
+    // 它更长而信息密度低，检索价值被 ai_summary 覆盖了。
+    'page_title',
     'source_type', 'cover_source', 'cover_index', 'created_at'
   ].join(',');
 

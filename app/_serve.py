@@ -8,11 +8,16 @@
    这里统一加 `Cache-Control: no-store`，保证每次刷新都是磁盘上的最新代码。
 2. 分享链接是路径形态（/s/令牌、/i/令牌，PRD 4.6）。静态文件服务遇到这种
    路径只会 404，所以需要把这两条路径转发到 share.html。
+3. 抓网页元数据（GET /api/meta?u=、GET /api/img?u=，见 _page_meta.py）：
+   对方站不发 CORS 头，浏览器拿不到它们的 HTML 与图片字节，只能由服务端代取。
+   这条是 2026-09-21 新增的——**它让「必须有服务端」从「分享链接的需要」升级成
+   「采集功能的需要」**：即便将来把分享链接改成 ?t=令牌 形式，这两个端点也去不掉。
 
 关于第 2 点，**必须知道的代价**：路径转发是服务端行为，纯静态托管做不到。
 选了路径形态的分享链接，就意味着发布时要用「带一个服务端」的方式（本文件
 即是那个服务端），不能用纯静态托管。share.html 同时认 ?t=令牌 形式，
 所以如果实测平台跑不了服务端，把链接生成处改成 ?t= 即可，页面代码不用动。
+（注意：真按上面说的退化成 ?t=，第 1 条的 /api/* 仍然要服务端，退不掉。）
 
 发布要求（平台侧）：监听环境变量 PORT、绑定 0.0.0.0。本地开发默认
 127.0.0.1:8791，不占公网。
@@ -27,13 +32,21 @@
 """
 import functools
 import http.server
+import json
 import os
 import re
 import socketserver
 import sys
+import urllib.parse
+
+import _page_meta as page_meta
 
 # /s/<令牌> 或 /i/<令牌>，末尾斜杠可选
 SHARE_PATH = re.compile(r"^/([si])/([A-Za-z0-9_-]{4,64})/?$")
+
+# 抓网页元数据的两个端点（实现见 _page_meta.py，那里写了「为什么必须放在服务端」）。
+API_META_PATH = "/api/meta"
+API_IMG_PATH = "/api/img"
 
 
 class AppHandler(http.server.SimpleHTTPRequestHandler):
@@ -43,10 +56,53 @@ class AppHandler(http.server.SimpleHTTPRequestHandler):
         self.send_header("Expires", "0")
         super().end_headers()
 
+    def _send_json(self, obj, status=200):
+        body = json.dumps(obj, ensure_ascii=False).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _api(self, path, query):
+        target = (query.get("u") or [""])[0]
+        if not target:
+            self._send_json({"ok": False, "error": "缺少参数 u"}, 400)
+            return
+        try:
+            if path == API_META_PATH:
+                meta = page_meta.fetch_meta(target)
+                meta["ok"] = True
+                self._send_json(meta)
+            else:
+                _final, ctype, body = page_meta.fetch_image(target)
+                self.send_response(200)
+                self.send_header("Content-Type", ctype)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+        except page_meta.FetchError as exc:
+            if path == API_META_PATH:
+                # 抓不到**不是服务故障**：录入流程要能照常走完（降级成没有封面）。
+                # 所以这里给 200 + ok:false，前端只认 ok，不靠状态码区分。
+                self._send_json({"ok": False, "error": str(exc)})
+            else:
+                err = json.dumps({"ok": False, "error": str(exc)},
+                                 ensure_ascii=False).encode("utf-8")
+                self.send_response(502)
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self.send_header("Content-Length", str(len(err)))
+                self.end_headers()
+                self.wfile.write(err)
+
     def do_GET(self):
+        split = urllib.parse.urlsplit(self.path)
+        if split.path in (API_META_PATH, API_IMG_PATH):
+            self._api(split.path, urllib.parse.parse_qs(split.query))
+            return
         # 只改服务端实际去读哪个文件，**不改浏览器地址栏**
         # （share.html 从 location.pathname 里取令牌，所以地址必须留着）。
-        if SHARE_PATH.match(self.path.split("?")[0]):
+        if SHARE_PATH.match(split.path):
             self.path = "/share.html"
         super().do_GET()
 

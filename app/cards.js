@@ -146,6 +146,10 @@
         + '</div>';
     } else if (it.status === 'pending') {
       thumb = '<div class="cthumb notxt"><p><span class="spin"></span> 正在读这条素材…</p></div>';
+    } else if (it.source_url) {
+      // 存了链接但没抓到封面（P1-1）。文案要说清「不是坏了」并指路原文——
+      // 原来这里和无图素材共用一句话，于是整整一屏灰块看着像加载失败。
+      thumb = '<div class="cthumb notxt"><p>这条来自原文链接<br>没抓到封面，可点开看原文</p></div>';
     } else {
       // F3-2：无图也要出卡片，不能是空白占位
       thumb = '<div class="cthumb notxt"><p>这条没有配图<br>纯文本素材照样进库</p></div>';
@@ -185,7 +189,11 @@
   // 否则「私有视图有看原图、分享视图忘了去掉」这类差异会散落各处。
   function cardActions(it, c, opts) {
     if (opts.readOnly) return '<span class="muted">只读分享 · 点卡片看详情</span>';
-    return (c.cover_thumb ? '<button class="linkbtn" data-act="shot" data-id="' + it.id + '">看原始截图</button>' : '')
+    // cover_source === 'link' 的封面是从原文网页抓来的图，库里**没有**原件：
+    // 「看原始截图」点开只会得到「这条没有图片」（openShot 读的是 item_images）。
+    // 所以按封面来源决定给不给这个按钮，而不是只要有缩略图就给。
+    var hasOriginals = c.cover_thumb && c.cover_source !== 'link';
+    return (hasOriginals ? '<button class="linkbtn" data-act="shot" data-id="' + it.id + '">看原始截图</button>' : '')
       + (it.source_url ? '<a class="linkbtn" href="' + esc(it.source_url) + '" target="_blank" rel="noopener">原文</a>' : '')
       + (c.cover_thumb || it.source_url ? '' : '<span class="muted">没有原图也没有链接</span>');
   }
@@ -194,7 +202,10 @@
 
   function haystack(it) {
     if (it._hay != null) return it._hay;
-    it._hay = [it.ai_title, it.ai_summary, it.ai_caption, it.ocr_text, it.raw_text, it.my_note,
+    // page_title 也进来：存链接的素材，原文标题里有 AI 收敛掉的信息（作者、地点），
+    // 「搜工作室名」是这套库的真实用法。
+    it._hay = [it.ai_title, it.page_title, it.ai_summary, it.ai_caption, it.ocr_text,
+      it.raw_text, it.my_note,
       it.category, (it.ai_tags || []).join(' '), (it.my_tags || []).join(' ')]
       .filter(Boolean).join(' ').toLowerCase();
     return it._hay;

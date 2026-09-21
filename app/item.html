@@ -209,6 +209,8 @@
     if (!it.cover_thumb) return '（这条没有封面）';
     if (it.cover_source === 'crop') return '从截图裁出主体';
     if (it.cover_source === 'raw') return '整图（未裁）';
+    // 2026-09-21 新增：只填网址时封面是从原文网页抓来的，库里没有原件
+    if (it.cover_source === 'link') return '取自原文网页（库里没有原件）';
     return it.cover_source || '';
   }
 
@@ -235,16 +237,22 @@
   function renderCover() {
     var it = state.item;
     var box = $('coverBox');
+    // cover_source === 'link'：封面来自原文网页的抓取，item_images 里**没有**原件。
+    // 这决定了三件事：不能重裁、不能「看第 N 张」、无封面时的文案要说清不是坏了。
+    var linkCover = it.cover_source === 'link';
     box.innerHTML = it.cover_thumb
       ? '<img src="' + S.toDataUrl('image/jpeg', it.cover_thumb) + '" data-act="zoom" data-i="' + (it.cover_index || 0) + '" alt="封面">'
-      : '<div class="none">这条素材没有配图<br>纯文本的灵感照样进库</div>';
+      : (it.source_url
+          ? '<div class="none">这条来自原文链接<br>没抓到封面，'
+            + '<a href="' + esc(it.source_url) + '" target="_blank" rel="noopener">打开原文看</a></div>'
+          : '<div class="none">这条素材没有配图<br>纯文本的灵感照样进库</div>');
     $('coverNote').textContent = coverNoteText();
 
     // F5-8：只有所有者能看到换封面的入口
     var ci = it.cover_index || 0;
     var rect = rectFor(ci);
     var acts = [];
-    if (it.cover_thumb) {
+    if (it.cover_thumb && !linkCover) {
       if (it.cover_source !== 'raw') {
         acts.push('<button class="btn ghost sm" data-act="cover-raw">用整图（不裁）</button>');
       }
@@ -256,10 +264,17 @@
         acts.push('<button class="btn ghost sm" data-act="cover-crop">让 AI 判这张图的画面区（要等一会儿）</button>');
       }
     }
+    if (linkCover) {
+      acts.push('<span class="muted">封面是从原文网页抓来的，库里没有原件，所以没有重裁可做</span>');
+    }
     $('coverActs').innerHTML = acts.join('') || '<span class="muted">没有可用的封面操作</span>';
 
     var rows = [];
-    rows.push('封面取第 ' + (ci + 1) + ' 张');
+    if (linkCover) {
+      rows.push('封面取自原文网页（库里没有原件）');
+    } else {
+      rows.push('封面取第 ' + (ci + 1) + ' 张');
+    }
     rows.push('封面来源 ' + (it.cover_source || '—'));
     if (rect) {
       rows.push('这张图的 AI 矩形 ' + rect.left + '/' + rect.top + '/' + rect.right + '/' + rect.bottom + '%');
@@ -280,7 +295,12 @@
     var it = state.item;
     var ci = it.cover_index || 0;
     if (!state.imgs.length) {
-      $('shots').innerHTML = '<div class="muted">这条没有图片</div>';
+      // 只填网址的素材就是这样：封面是从原文抓来的，库里没有原件。
+      // 说清原因，否则会被当成「图片丢了」。
+      $('shots').innerHTML = it.source_url
+        ? '<div class="muted">这条是存链接进来的，库里没有原图；封面（如果有）是从原文网页抓的。'
+          + '要看内容请走上面的「原文」。</div>'
+        : '<div class="muted">这条没有图片</div>';
       $('imgNote').textContent = '';
       return;
     }
@@ -482,6 +502,19 @@
 
     /* 原文 */
     h.push('<div class="panel"><h2>原文</h2>');
+    // 抓来的网页标题/描述（2026-09-21 新增）。放在这里而不是混进「原文」里，
+    // 因为两者来源不同：这两行是系统从网页抓的，下面才是用户自己粘贴的。
+    // 也正是这两行让「只填网址」的素材第一次有了可判断的文字依据。
+    if (it.page_title || it.page_desc) {
+      if (it.page_title) {
+        h.push('<div class="kv"><b>网页标题</b><span>' + esc(it.page_title) + '</span></div>');
+      }
+      if (it.page_desc) {
+        h.push('<div class="kv"><b>网页描述</b><span>' + esc(it.page_desc) + '</span></div>');
+      }
+      h.push('<div class="hint" style="margin:8px 0 12px">上面两行是录入时从原文网页抓的'
+        + '（title / og:description）。AI 判抽屉与标签时会看到它们；下面这一块才是你自己粘的。</div>');
+    }
     h.push(owner
       ? '<textarea class="inp" id="fRaw" style="min-height:110px">' + esc(it.raw_text || '') + '</textarea>'
         + '<div class="foot"><span class="hint">' + (it.raw_text ? it.raw_text.length + ' 字' : '空') + '</span>'

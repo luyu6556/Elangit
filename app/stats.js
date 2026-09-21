@@ -62,12 +62,22 @@
 
   /* ---------- A1：录入耗时 ---------- */
 
-  // events 必须由 store.loadFirstEvents('item_create_finish', 20) 取回。
-  // 传进来的是「最早 20 条」这件事由查询保证，这里只做双保险再截一次。
+  // A1 的样本窗口要「最早 20 条**符合口径**的事件」，所以查询要多取一些，
+  // 用来吸收被过滤掉的（旧口径样本、ms 缺失样本）。样本窗口是查询的属性，
+  // 不能在渲染层补救：窗口错了，均值就是另一个数，而且看不出错。
+  function a1Fetch() { return GATES.A1 * 3; }
+
+  // events 由 store.loadFirstEvents('item_create_finish', a1Fetch()) 取回。
+  //
+  // 只认 ms_from === 'input' 的样本（2026-09-21 改，P0-1）。旧口径（没有 ms_from，
+  // 或 ms_from === 'page'）量的是「从打开录入页到入库」的累计值：一次会话连录
+  // 多条时它会累加，实测 16 条连录得到 27.8s→45.5s 单调递增，而真实提交只花
+  // 200ms 上下。两种口径的数不可比，**宁可不计，也不要把不可比的数掺进均值**。
   function a1(events) {
     var need = GATES.A1;
     var ms = (events || [])
-      .map(function (e) { return Number(e.props && e.props.ms) || 0; })
+      .filter(function (e) { return e && e.props && e.props.ms_from === 'input'; })
+      .map(function (e) { return Number(e.props.ms) || 0; })
       .filter(function (x) { return x > 0; });
     var sample = ms.slice(0, need);
     return {
@@ -75,23 +85,45 @@
       need: need,
       ok: gateOk(sample.length, need),
       text: gateText(sample.length, need),
-      mean: mean(sample)
+      mean: mean(sample),
+      median: median(sample),
+      max: sample.length ? Math.max.apply(null, sample) : null
     };
   }
 
   /* ---------- A2：AI 标签可用率 ---------- */
 
+  // 单个字段的可用率。**分母是「AI 真的产出过这个字段」的样本数**（P0-2）。
+  // 产出样本为 0 → 这个字段在这里根本无从判断，按「样本不足」处理，不给百分比。
+  // need 默认取 A2 的门槛：整张表与表里每一行用同一个门槛，读起来才一致，
+  // 也才不会出现「2 个样本 100%」这种数字。
+  function fieldRate(f, need) {
+    need = need || GATES.A2;
+    var produced = f ? f.produced : 0;
+    if (!produced) return { ok: false, n: 0, need: need, text: gateText(0, need), rate: null };
+    var ok = gateOk(produced, need);
+    return {
+      ok: ok,
+      n: produced,
+      need: need,
+      text: ok ? null : gateText(produced, need),
+      rate: ok ? f.kept / produced : null
+    };
+  }
+
   function a2(items, diff) {
     var need = GATES.A2;
     var s = diff.summary(items || [], { firstN: need });
-    var tg = s.byField.tags;
+    var tags = fieldRate(s.byField.tags, need);
     return {
-      n: s.withRaw,                 // 进分母的样本数（≤ 50）
+      n: s.withRaw,                 // 进表级的样本数（≤ 50）
       need: need,
       ok: gateOk(s.withRaw, need),
       text: gateText(s.withRaw, need),
       summary: s,
-      rate: tg && tg.total ? 1 - tg.changed / tg.total : null
+      rate: tags.rate,              // null = 「标签」这一行的产出样本还不够
+      rateText: tags.text,
+      fieldRate: fieldRate
     };
   }
 
@@ -177,8 +209,10 @@
     firstN: firstN,
     mean: mean,
     median: median,
+    a1Fetch: a1Fetch,
     a1: a1,
     a2: a2,
+    fieldRate: fieldRate,
     a4: a4,
     a13: a13,
     a12: a12,

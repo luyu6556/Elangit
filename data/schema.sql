@@ -81,7 +81,13 @@ create table items (
   created_at      timestamptz not null default now(),
   updated_at      timestamptz not null default now(),
   ai_raw          jsonb,
-  ai_title        text
+  ai_title        text,
+  -- 2026-09-21 新增：只填网址时服务端抓来的原文标题 / 描述（_page_meta.py）。
+  -- 落库是为了「重跑 AI 时能复用」：AI 排在入库之后异步跑，页面刷新后 pending
+  -- 条目重新排队，那时内存里已经没有抓取结果了。page_title 同时进轻量索引，
+  -- 让「搜工作室名 / 项目原名」有效。
+  page_title      text,
+  page_desc       text
 );
 
 -- ---------- 6. item_images（图片本体，base64 直接存库） ----------
