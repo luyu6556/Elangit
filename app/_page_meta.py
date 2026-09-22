@@ -20,7 +20,8 @@
 
 ## 两个端点（在 _serve.py 里挂上）
 
-    GET /api/meta?u=<网页地址>   -> {ok, site, title, h1, desc, image}
+    GET /api/meta?u=<网页地址>   -> {ok, site, title, h1, desc, image, text}
+                                   （text 是正文，2026-09-22 加；抽不到就是空串）
     GET /api/img?u=<图片地址>    -> 图片字节原样透传（同源，前端可进 canvas）
 
 ## 安全：这个模块等于给公网一个「替我取这个 URL」的入口
@@ -193,6 +194,136 @@ def _clean_title(raw):
     return t[:160]
 
 
+# ---------- 正文抽取（2026-09-22 新增） ----------
+#
+# 为什么必须抽正文：AI 生成摘要时原本只有 og:title / og:description 可用，而
+# og:description 在 gooood 这类案例站上是**每篇都一样的客套模板**
+# （「非常感谢 … 予gooood分享以下内容。更多关于：…」）——实测零信息量。
+# 结果就是摘要只能把标题和站名拼一遍（线上 id=28 的实测结论）。
+# 抽到正文，摘要才可能真的总结「这份设计说明讲了什么」。
+#
+# 为什么不引正文抽取库（trafilatura / readability）：这个模块是「给公网一个
+# 替我取 URL 的入口」，依赖越少越好部署；而且它是纯标准库的（见文件头）。
+# 代价是长尾站点抽不准——那就返回空串，调用方退回原来的行为，不会更差。
+#
+# 上限只影响落库；喂给 AI 时还会再截一次（ai.js 的 BODY_LIMIT），
+# 因为 token 就是首字延迟：实测 1160 字提示词首字 21.1s，而超时是 60s。
+MAX_BODY_CHARS = 8000
+
+# 页面的「动作位」：收藏、分享、推广入口、相关阅读。这些不是内容，
+# 抽进去只白占 AI 的 token。**注意不删**「设计公司 / 位置 / 类型 / 材料 / 标签」
+# 这类元信息行——对一份设计说明的总结来说，类型与材料恰恰是有效信息。
+_CHROME_LINE = re.compile(
+    r"^(?:收藏|分享|点赞|评论|转发|举报|扫码|投稿|订阅|广告|关注我们|相关文章|相关阅读|"
+    r"热门|推荐阅读|上一篇|下一篇|返回列表|阅读全文|查看推广方案|业主找设计师|提交项目|"
+    r"在线项目|查看机会|设计师接项目|建材品牌推广|品牌展示|进入材料库|项目标签|文章项目推广)\b")
+
+_CJK = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]")
+
+
+def _drop_translation(lines):
+    """中英双语页面只留中文那一半。
+
+    为什么要做：gooood 每个中文段落后面都跟着同一段的英文。实测同一篇
+    8,000 字里中文只有 1,506 字，其余是英文原文与双语的图注——纯粹白占
+    AI 的 token，而 token 就是首字延迟（实测 1160 字提示词首字 21.1s，
+    超时 60s）。所以这不是「优化」，是让正文塞得进预算。
+
+    判据：**整篇中文够多（>200 字）才认为这是双语页**，此时丢掉「几乎不含
+    中文」的行。纯英文页照旧全留——否则会把英文案例清空。全滤掉（说明判据
+    在这页上失效）时也退回不滤，宁可多送。
+    """
+    total = sum(len(_CJK.findall(l)) for l in lines)
+    if total < 200:
+        return lines
+    kept = [l for l in lines if len(_CJK.findall(l)) / max(1, len(l)) >= 0.25]
+    return kept if sum(len(l) for l in kept) >= 200 else lines
+
+
+def _strip_chrome(html_text):
+    """删掉页面骨架：脚本、样式、导航、页头页脚。
+
+    整块删 <header>/<footer>/<nav> 是安全的：案例站的标题图与正文都不在里面。
+    替换成换行而不是空格，免得把前后两段正文粘成一句。
+    """
+    for tag in ("script", "style", "noscript", "nav", "header", "footer",
+                "aside", "form", "svg", "iframe"):
+        html_text = re.sub(r"<%s\b[\s\S]*?</%s\s*>" % (tag, tag), "\n",
+                           html_text, flags=re.I)
+    return html_text
+
+
+def _blocks_to_text(fragment):
+    """块级标签换成换行 → 去标签 → 反转义 → 逐行清理。
+
+    保留段落结构是有用的：挤成一行之后就没法按行丢掉动作位了。
+    """
+    fragment = re.sub(r"<(?:br|/p|/div|/li|/h[1-6]|/tr|/section|/article|/main)\b[^>]*>",
+                      "\n", fragment, flags=re.I)
+    text = unescape(re.sub(r"<[^>]+>", " ", fragment))
+    out, seen = [], set()
+    for line in text.split("\n"):
+        line = " ".join(line.split())
+        if not line or _CHROME_LINE.match(line):
+            continue
+        if line in seen:        # 同一句在导航与正文各出现一次时只留一份
+            continue
+        seen.add(line)
+        out.append(line)
+    return "\n".join(_drop_translation(out))
+
+
+def _balanced_blocks(html_text, tag, attr_pattern, limit=40):
+    """按标签配对取出容器内容。
+
+    不能用「<div[^>]*class=content[^>]*>[\\s\\S]*?</div>」这种非贪婪写法：
+    它停在**最近的**闭标签上，正文里嵌套一层 div 就被截断，只剩开头一句。
+    所以这里自己数开闭标签的深度，取真正配平的那一段。
+    """
+    out = []
+    opening = re.compile(r"<" + tag + r"\b[^>]*" + attr_pattern + r"[^>]*>", re.I)
+    paired = re.compile(r"<(/?)" + tag + r"\b[^>]*>", re.I)
+    for m in opening.finditer(html_text):
+        if len(out) >= limit:
+            break
+        start, depth = m.end(), 1
+        end = len(html_text)
+        for t in paired.finditer(html_text, start):
+            depth += -1 if t.group(1) else 1
+            if depth == 0:
+                end = t.start()
+                break
+        out.append(html_text[start:end])
+    return out
+
+
+def extract_body(html_text):
+    """抽出正文文本。抽不到返回 ""，调用方照旧走「只有标题」的降级。"""
+    try:
+        cleaned = _strip_chrome(html_text)
+        best = ""
+        # 容器语义从强到弱：<article> → <main> → class/id 里带 content/entry 之类的 div
+        groups = [
+            _balanced_blocks(cleaned, "article", ""),
+            _balanced_blocks(cleaned, "main", ""),
+            _balanced_blocks(cleaned, "div",
+                             r'(?:id|class)\s*=\s*["\'][^"\']*'
+                             r'(?:content|entry|post|article|detail|main|body)[^"\']*["\']'),
+        ]
+        for group in groups:
+            for frag in group:
+                t = _blocks_to_text(frag)
+                if len(t) > len(best):
+                    best = t
+        # 容器都没找到（或者都短得不像正文）就退回整页：宁可带点导航噪声，
+        # 也别让摘要继续靠标题猜。
+        if len(best) < 200:
+            best = _blocks_to_text(cleaned)
+        return best[:MAX_BODY_CHARS]
+    except Exception:
+        return ""
+
+
 def parse_meta(html_text, base_url):
     raw_title = _meta_content(html_text, ["og:title", "twitter:title"])
     if not raw_title:
@@ -220,11 +351,13 @@ def parse_meta(html_text, base_url):
         "h1": h1[:160],
         "desc": " ".join(desc.split())[:400],
         "image": urllib.parse.urljoin(base_url, image) if image else "",
+        # 正文（2026-09-22）。抽不到就是空串——前端照旧只拿标题与描述去喂 AI。
+        "text": extract_body(html_text),
     }
 
 
 def fetch_meta(url):
-    """返回 dict：{site, title, rawTitle, h1, desc, image}。失败抛 FetchError。"""
+    """返回 dict：{site, title, rawTitle, h1, desc, image, text}。失败抛 FetchError。"""
     final, _ctype, body = fetch_bytes(
         url, MAX_HTML_BYTES,
         lambda t: t.startswith("text/html") or t.startswith("application/xhtml"))
@@ -245,9 +378,15 @@ def _main(argv):
         if argv[2:3] == ["--img"]:
             final, ctype, body = fetch_image(url)
             print("%s\n%s\n%d bytes" % (final, ctype, len(body)))
-        else:
-            meta = fetch_meta(url)
-            print(json.dumps(meta, ensure_ascii=False, indent=2))
+            return 0
+        meta = fetch_meta(url)
+        if argv[2:3] == ["--body"]:
+            print(meta["text"] or "（没抽到正文）")
+            return 0
+        # 正文可能有上千字，默认只报长度 —— 不然这个工具的输出没法读。
+        body = meta.get("text") or ""
+        meta["text"] = "（%d 字，加 --body 看全文）" % len(body) if body else ""
+        print(json.dumps(meta, ensure_ascii=False, indent=2))
     except FetchError as exc:
         print("失败：%s" % exc)
         return 1

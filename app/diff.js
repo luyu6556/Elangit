@@ -28,6 +28,9 @@
     var out = [
       { key: 'title', label: '项目名称', before: s(ai.title), after: s(it.ai_title) },
       { key: 'summary', label: '摘要', before: s(ai.summary), after: s(it.ai_summary) },
+      // 三段总结（2026-09-22）。它也要能算「AI 原值 → 我改了什么」：
+      // 这是判断这套 digest 到底可不可用的唯一依据（A2 的分母靠它）。
+      { key: 'digest', label: '设计说明总结', before: s(ai.digest), after: s(it.ai_digest) },
       { key: 'caption', label: '画面描述', before: s(ai.caption), after: s(it.ai_caption) },
       { key: 'ocr_text', label: '图中文字', before: s(ai.ocrText), after: s(it.ocr_text) },
       { key: 'category', label: '抽屉', before: s(ai.category), after: s(it.category) },

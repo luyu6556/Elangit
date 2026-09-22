@@ -70,9 +70,17 @@
       <h3>抽屉</h3>
       <div id="navCats"></div>
     </div>
-    <div class="sec">
-      <h3>标签</h3>
-      <div id="navTags"></div>
+
+    <!-- 与 index.html 同款：手机端默认收起，首屏让给卡片（2026-09-22） -->
+    <button class="filt-toggle" id="filtToggle" type="button" aria-expanded="false" aria-controls="filtBody">
+      <span>更多筛选</span><span class="ft-c" id="filtCount"></span><span class="ft-a">▾</span>
+    </button>
+
+    <div class="filt-body" id="filtBody">
+      <div class="sec">
+        <h3>标签</h3>
+        <div id="navTags"></div>
+      </div>
     </div>
   </aside>
 
@@ -102,10 +110,11 @@
     <div class="dcols">
       <div class="col-media">
         <div class="coverbox" id="dCoverBox"></div>
-        <div class="panel" style="margin-top:14px">
-          <h2>全部原图 <span class="muted" id="dImgNote"></span></h2>
-          <div class="shots" id="dShots"></div>
-        </div>
+        <!-- 「去哪儿看原件」的唯一入口：有原图给「查看原图」，有链接给「跳转原文网址」。
+             与 item.html 同一套规则（2026-09-22）。 -->
+        <div class="covgo" id="dCoverGo"></div>
+        <!-- 「全部原图」那张卡片取消了，缩略图条并进封面区，只有多图时才出现。 -->
+        <div class="shots" id="dShots"></div>
       </div>
       <div class="col-fields" id="dFields"></div>
     </div>
@@ -258,6 +267,8 @@
     }
     $('count').textContent = C.countText(page.length, state.filtered.length);
     $('reset').style.display = filtering ? '' : 'none';
+    // 收起「更多筛选」后标签看不见，把「已选几个」顶到开关上（同 index.html）
+    C.setFiltCount(state.tags.length);
     ensureCards(page);
   }
 
@@ -331,28 +342,44 @@
     $('hdrNote').textContent = t || '一条素材';
     $('backBtn').style.display = state.canBack ? '' : 'none';
     $('dFields').innerHTML = detailFieldsHtml(it);
+    $('dCoverBox').className = 'coverbox';
     $('dCoverBox').innerHTML = '<div class="none">正在取图…</div>';
+    $('dCoverGo').innerHTML = '';
     $('dShots').innerHTML = '';
-    $('dImgNote').textContent = '';
     show('detail');
     window.scrollTo({ top: 0 });
 
     var ci = it.cover_index || 0;
+    // 「去哪儿看原件」。和 item.html 一样：有本地原件 → 看原图；只抓了网页 → 去原文。
+    var go = [];
+    if (it.source_url) {
+      go.push('<a class="linkbtn" href="' + C.esc(it.source_url) + '" target="_blank" rel="noopener">跳转原文网址 ↗</a>');
+    }
     return S.getImages(it.id).then(function (imgs) {
       state.imgs = imgs;
-      if (!imgs.length) {
+      if (imgs.length) {
+        var at = Math.min(ci, imgs.length - 1);
+        $('dCoverBox').innerHTML = '<img data-i="' + at + '" src="' + C.toDataUrl(imgs[at].mime, imgs[at].data_base64) + '" alt="">';
+        go.unshift('<button class="linkbtn" data-zoom="1" data-i="' + at + '">查看原图</button>');
+        // 缩略图条只在多图时出现（单图时它没有用途）。
+        if (imgs.length > 1) {
+          $('dShots').innerHTML = '<div class="shots-hint">共 ' + imgs.length + ' 张，点开可放大（原件永不被裁）</div>'
+            + imgs.map(function (im, i) {
+              return '<div class="shot-t' + (i === at ? ' t-on' : '') + '" data-i="' + i + '">'
+                + '<img src="' + C.toDataUrl(im.mime, im.data_base64) + '" alt="" loading="lazy">'
+                + '<span class="lb"><span>第 ' + (i + 1) + ' 张</span><span>' + im.width + '×' + im.height + '</span></span>'
+                + '</div>';
+            }).join('');
+        }
+      } else if (it.cover_thumb) {
+        // 只抓了网页的封面：库里没有原件可放大，点它就是去原文。
+        // 这里原先走的是「这条素材没有配图」，但 cover_thumb 明明是有值的。
+        $('dCoverBox').className = 'coverbox c-link';
+        $('dCoverBox').innerHTML = '<img data-src="1" src="' + C.toDataUrl('image/jpeg', it.cover_thumb) + '" alt="封面">';
+      } else {
         $('dCoverBox').innerHTML = '<div class="none">这条素材没有配图<br>它的内容以文字为主</div>';
-        return;
       }
-      var at = Math.min(ci, imgs.length - 1);
-      $('dCoverBox').innerHTML = '<img data-i="' + at + '" src="' + C.toDataUrl(imgs[at].mime, imgs[at].data_base64) + '" alt="">';
-      $('dImgNote').textContent = '共 ' + imgs.length + ' 张，点开可放大（原件永不被裁）';
-      $('dShots').innerHTML = imgs.map(function (im, i) {
-        return '<div class="shot-t' + (i === at ? ' t-on' : '') + '" data-i="' + i + '">'
-          + '<img src="' + C.toDataUrl(im.mime, im.data_base64) + '" alt="" loading="lazy">'
-          + '<span class="lb"><span>第 ' + (i + 1) + ' 张</span><span>' + im.width + '×' + im.height + '</span></span>'
-          + '</div>';
-      }).join('');
+      $('dCoverGo').innerHTML = go.join(' ');
     }).catch(function (e) {
       $('dCoverBox').innerHTML = '<div class="none">图片没取到：' + C.esc(S.describe(e)) + '</div>';
     });
@@ -411,7 +438,14 @@
     if (e.target.closest('[data-close]')) { closeZoom(); return; }
     if (e.target.classList && e.target.id === 'zoom') { closeZoom(); return; }
 
-    var shot = e.target.closest('.shot-t, .coverbox img');
+    // 顺序不能反：抓来的网页封面也长成 .coverbox img，只是多了个 data-src。
+    // 它没有本地原件可放大，点它就是去原文（2026-09-22）。
+    var srcImg = e.target.closest('.coverbox img[data-src]');
+    if (srcImg) {
+      if (state.item && state.item.source_url) window.open(state.item.source_url, '_blank', 'noopener');
+      return;
+    }
+    var shot = e.target.closest('.shot-t, .coverbox img, [data-zoom]');
     if (shot) { openZoom(Number(shot.getAttribute('data-i')) || 0); return; }
 
     var resetBtn = e.target.closest('[data-act="reset"]');
@@ -424,7 +458,20 @@
     if (card) {
       var id = Number(card.getAttribute('data-id'));
       var it = state.index.filter(function (x) { return x.id === id; })[0];
-      if (it) renderDetail(it, { fromCollection: true });
+      if (!it) return;
+      // 轻量索引**刻意不带 cover_thumb**（列表页的缩略图是另一条批量查询给的），
+      // 但详情区的封面要用它：尤其「只存了网址」的素材，封面是从原文网页抓来的，
+      // item_images 里没有原件——不补这一次查询，那类素材的分享详情会显示
+      // 「这条素材没有配图」，而它明明有封面（2026-09-22）。
+      if (!it.cover_thumb) {
+        S.cardsByIds([id]).then(function (rows) {
+          var c = (rows || [])[0];
+          if (c && c.cover_thumb) it.cover_thumb = c.cover_thumb;
+          renderDetail(it, { fromCollection: true });
+        }).catch(function () { renderDetail(it, { fromCollection: true }); });
+      } else {
+        renderDetail(it, { fromCollection: true });
+      }
       return;
     }
   });
@@ -442,6 +489,7 @@
     renderGrid();
   });
 
+  C.wireFilterToggle();   // 窄屏的「更多筛选」开关（桌面端按钮被 CSS 隐藏）
   boot();
 })();
 </script>

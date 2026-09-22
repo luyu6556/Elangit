@@ -203,8 +203,9 @@
   function haystack(it) {
     if (it._hay != null) return it._hay;
     // page_title 也进来：存链接的素材，原文标题里有 AI 收敛掉的信息（作者、地点），
-    // 「搜工作室名」是这套库的真实用法。
-    it._hay = [it.ai_title, it.page_title, it.ai_summary, it.ai_caption, it.ocr_text,
+    // 「搜工作室名」是这套库的真实用法。ai_digest（设计说明总结，2026-09-22）
+    // 同理：正文里的做法与材料名大多落在那里，搜「夯土」「模块化」该命中它。
+    it._hay = [it.ai_title, it.page_title, it.ai_summary, it.ai_digest, it.ai_caption, it.ocr_text,
       it.raw_text, it.my_note,
       it.category, (it.ai_tags || []).join(' '), (it.my_tags || []).join(' ')]
       .filter(Boolean).join(' ').toLowerCase();
@@ -241,6 +242,30 @@
     return shown < total ? '显示 ' + shown + ' / 共 ' + total + ' 条' : total + ' 条';
   }
 
+  /* ---------- 窄屏的「更多筛选」开关（2026-09-22） ---------- */
+
+  // 为什么放在这个共用模块里：index.html 与 share.html 的侧栏结构完全相同，
+  // 各写一份的话迟早只有一边记得改（分享页是给外人看的那一面，最不该不一致）。
+  // 桌面端这颗按钮被 CSS 隐藏，这里只是把点击接上，不做任何尺寸判断 ——
+  // 「什么时候显示」交给媒体查询一处决定，不在这里再写一个断点。
+  function wireFilterToggle() {
+    var btn = document.getElementById('filtToggle');
+    if (!btn) return;
+    var aside = btn.closest('aside');
+    if (!aside) return;
+    btn.addEventListener('click', function () {
+      var open = aside.classList.toggle('open');
+      btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+    });
+  }
+
+  // 收起后标签是看不见的，但筛选还在生效 —— 把「已选 N」显示在开关上，
+  // 否则用户看着被筛过的结果却找不到原因。
+  function setFiltCount(n) {
+    var el = document.getElementById('filtCount');
+    if (el) el.textContent = n ? '· 已选 ' + n + ' 个标签' : '';
+  }
+
   global.Elangit = global.Elangit || {};
   global.Elangit.cards = {
     esc: esc,
@@ -253,6 +278,8 @@
     cardHtml: cardHtml,
     haystack: haystack,
     matches: matches,
+    wireFilterToggle: wireFilterToggle,
+    setFiltCount: setFiltCount,
     emptyHtml: emptyHtml,
     countText: countText
   };

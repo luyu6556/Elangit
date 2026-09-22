@@ -29,6 +29,17 @@
   //
   // 抽屉的边界判据来自 PRD 4.2.1（首次真实压测得出）：改造类素材按
   // 「改造后的结果功能」归抽屉，改造前的历史属性下沉为标签。
+
+  // 网页正文送进模型的字数上限（2026-09-22）。
+  //
+  // 定 6000 而不是更小：三段式总结的「效果」写在设计说明的**末尾**，
+  // 从中间截断会正好把「效果」砍掉——那是最值得看的一段。
+  // 实测存量 4 篇 gooood 文章抽出来的正文是 3,304–5,363 字，6000 能整篇装下。
+  //
+  // 这是全提示词里最大的一块，直接顶高首字延迟（见上面的实测），
+  // 所以这个值必须跟着实测的耗时调，不能凭感觉改。
+  var BODY_LIMIT = 6000;
+
   function buildPrompt(taxonomy, opts) {
     var names = taxonomy.categories.map(function (c) { return c.name; });
     var lines = [
@@ -42,6 +53,16 @@
     var fields = [
       '"title":"项目或案例名，专有名词，不超过12字，判不出就给空字符串"',
       '"summary":"一句话摘要，不超过50字"',
+      // digest 是 2026-09-22 新增的第二份总结，与 summary 分工不同：
+      //   summary 给列表卡片用（只显示两行），所以必须短、且要能认出是哪条项目；
+      //   digest  给详情页用，回答「这份设计说明讲了什么、值不值得点进原文」。
+      // 格式定死成三行带标签，是因为界面按行渲染、按标签加粗，格式漂了就渲染不出来。
+      // 「不是设计项目就留空」不是可选项：存量里就有奖项榜单页（id=8），
+      // 对它硬编「理念/做法/效果」只会得到一段像模像样的假话。
+      '"digest":"网页正文的三段总结，固定三行，每行依次以「理念：」「做法：」「效果：」开头，'
+        + '每行一句，整段不超过120字。看的人要凭它判断值不值得点进原文，'
+        + '所以写具体做法与达到的效果，不要重复项目名。'
+        + '没有网页正文、或这条不是设计项目（新闻、榜单、合集、工具页）时给空字符串"',
       '"caption":"画面描述，无图则为空字符串"',
       '"ocr_text":"图中文字，只留标题与关键信息，不超过200字，无则空字符串"',
       '"category":"上面清单中的抽屉名"',
@@ -60,13 +81,16 @@
     // 网页标题与描述来自服务端抓取（_page_meta.py，2026-09-21 新增）。
     if (opts.pageTitle) lines.push('【网页标题】' + String(opts.pageTitle).slice(0, 200));
     if (opts.pageDesc) lines.push('【网页描述】' + String(opts.pageDesc).slice(0, 500));
+    // 正文（2026-09-22 新增）。放在描述之后、网址之前：它是最大的一块，
+    // 而「网页描述」在 gooood 上是每篇都一样的客套话，靠它写不出 digest。
+    if (opts.pageText) lines.push('【网页正文】' + String(opts.pageText).slice(0, BODY_LIMIT));
     if (opts.url) lines.push('【网址】' + opts.url);
     // 下面这句只在**真的什么都没有**时才给。
     // 原来只要没有粘贴文本就会带上它 —— 于是「只填网址」这一类素材被提示词
     // 主动推向兜底抽屉。首次真实录入实测：4 条落兜底里有 2 条属于「AI 判错」
     // （P1-3，解忧小屋 / Wiedenhofer 本该进「建筑与构筑物」），而它们其实
     // 是有 og:title / og:description 可用的，只是当时没抓。
-    if (!opts.text && !opts.pageTitle && !opts.pageDesc && !opts.hasImage) {
+    if (!opts.text && !opts.pageTitle && !opts.pageDesc && !opts.pageText && !opts.hasImage) {
       lines.push('【只有网址，判不出就用兜底抽屉】');
     }
 
@@ -142,6 +166,49 @@
     s = s.replace(/^[《"'「【\[]+/, '').replace(/[》"'」】\]]+$/, '').trim();
     s = s.replace(/\s+/g, ' ');
     return s.slice(0, 20);
+  }
+
+  // 三段总结（digest）的容错（2026-09-22）。
+  //
+  // 界面是按行渲染、按「理念/做法/效果」这三个标签加粗的，所以这里必须
+  // 把模型的各种写法收敛成「每段一行、以标签开头」。见过/防着的写法：
+  //   数组 ["…","…","…"]、三段挤成一行用｜或空格隔开、漏标签、多空行。
+  //
+  // 特别注意**不要**给「连标签都没有、只有一整段」的结果硬贴一个「理念：」——
+  // 那是在编一个模型没做过的分类。这种情况原样返回，界面上就是一段普通文字。
+  var DIGEST_LABELS = ['理念', '做法', '效果'];
+  function normalizeDigest(v) {
+    if (v == null) return '';
+    var parts;
+    if (Object.prototype.toString.call(v) === '[object Array]') {
+      parts = v.map(function (x) { return String(x == null ? '' : x); });
+    } else {
+      var s = String(v).replace(/\r/g, '').trim();
+      if (!s) return '';
+      // 有换行就按行切；只有一行时才按那三个标签词切
+      parts = s.indexOf('\n') >= 0
+        ? s.split('\n')
+        : s.split(/(?=理念\s*[：:]|做法\s*[：:]|效果\s*[：:])/);
+    }
+
+    var labeled = parts.some(function (p) {
+      return /^\s*(理念|做法|效果)\s*[：:]/.test(p);
+    });
+    var out = [];
+    parts.forEach(function (p) {
+      p = String(p).trim().replace(/^[-—•*\s]+/, '').trim();
+      if (!p) return;
+      var m = /^(理念|做法|效果)\s*[：:]\s*([\s\S]*)$/.exec(p);
+      if (m) out.push(m[1] + '：' + m[2].trim());
+      else if (labeled && out.length < DIGEST_LABELS.length) {
+        // 只有确认这份结果本来就用标签分过段，才按顺序把漏掉的标签补上
+        out.push(DIGEST_LABELS[out.length] + '：' + p);
+      } else out.push(p);
+    });
+    if (!out.length) return '';
+    // 整段没标签又只有一段：原样返回，不贴标签
+    if (!labeled && out.length === 1) return out[0].slice(0, 300);
+    return out.slice(0, DIGEST_LABELS.length).join('\n').slice(0, 300);
   }
 
   /* ---------- 单次流式调用（analyze 与 detectRect 共用） ---------- */
@@ -227,7 +294,7 @@
       opts,
       buildPrompt(taxonomy, {
         text: opts.text, url: opts.url, hasImage: hasImage,
-        pageTitle: opts.pageTitle, pageDesc: opts.pageDesc
+        pageTitle: opts.pageTitle, pageDesc: opts.pageDesc, pageText: opts.pageText
       }),
       hasImage
     ).then(function (r) {
@@ -236,6 +303,7 @@
       return {
         title: normalizeTitle(p.title),
         summary: String(p.summary || '').trim().slice(0, 120),
+        digest: normalizeDigest(p.digest),
         caption: String(p.caption || '').trim(),
         ocrText: String(p.ocr_text || p.ocrText || '').trim(),
         category: cat.name,
@@ -309,6 +377,7 @@
       categoryOutOfList: r.categoryOutOfList || null,
       tags: r.tags || [],
       summary: r.summary || '',
+      digest: r.digest || '',
       caption: r.caption || '',
       ocrText: r.ocrText || '',
       platform: r.platform || null,
@@ -329,6 +398,7 @@
     normalizeRect: normalizeRect,
     normalizePlatform: normalizePlatform,
     normalizeTags: normalizeTags,
+    normalizeDigest: normalizeDigest,
     normalizeTitle: normalizeTitle
   };
 })(window);

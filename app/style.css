@@ -210,6 +210,11 @@ aside::-webkit-scrollbar-thumb{background:#DCD8D1;border-radius:3px}
 .taggroup .chip.on{outline:1.5px solid currentColor;outline-offset:-1.5px}
 .taggroup .chip .c{opacity:.62;font-variant-numeric:tabular-nums}
 
+/* 窄屏专用的「更多筛选」开关。桌面端不显示（下面的媒体查询里才 display:flex），
+   .filt-body 在桌面端就是一个普通 div，包住标签与分享两组，视觉上中性。 */
+.filt-toggle{display:none}
+.ft-c{font-size:11.5px;color:var(--ink-3)}
+
 main.list{flex:1;min-width:0;padding:24px 20px 80px 8px}
 .bar{display:flex;align-items:center;gap:12px;margin-bottom:16px;min-height:32px;flex-wrap:wrap}
 .bar .meta{font-size:13px;color:var(--ink-3)}
@@ -254,6 +259,17 @@ main.list{flex:1;min-width:0;padding:24px 20px 80px 8px}
 .coverbox{background:#EFEDE9;border-radius:8px;overflow:hidden;display:flex;align-items:center;justify-content:center;min-height:120px}
 .coverbox img{max-width:100%;max-height:44vh;width:auto;display:block;margin:0 auto;cursor:zoom-in}
 .coverbox .none{padding:40px 20px;text-align:center;color:var(--ink-3);font-size:12.5px;line-height:1.7}
+/* 抓来的网页封面没有本地原件，点它是去原文而不是放大——光标要说实话（2026-09-22）。 */
+.coverbox.c-link img{cursor:pointer}
+
+/* 「去哪儿看原件」入口（查看原图 / 跳转原文网址）。空的时候整块不占位，
+   所以「没有出口」这件事在样式层就不会留下一条空行。 */
+.covgo{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
+.covgo:empty{display:none}
+.covacts:empty,.covrow:empty,.shots:empty{display:none}
+.covacts{margin-top:10px;display:flex;flex-wrap:wrap;gap:6px}
+.covrow{font-size:11.5px;color:var(--ink-3);display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:10px}
+.shots-hint{font-size:11.5px;color:var(--ink-3);margin:12px 0 8px}
 
 .shots{display:grid;grid-template-columns:repeat(auto-fill,minmax(88px,1fr));gap:8px}
 .shot-t{position:relative;border:1px solid var(--line);border-radius:7px;overflow:hidden;background:#fff;cursor:zoom-in}
@@ -280,16 +296,64 @@ main.list{flex:1;min-width:0;padding:24px 20px 80px 8px}
   .col-media{width:100%;position:static}
 }
 
+/* ---------- 窄屏：内容优先（2026-09-22 改） ---------- */
+/* 原先窄屏只是把 .layout 改成竖排，于是整个侧栏（抽屉 4 项 + 标签 6 组 + 分享）
+   整块铺在卡片之前 —— 首屏全是筛选器，要往下滚一整屏才看到第一条素材。
+   手机打开一个「素材库」最想看到的是素材，不是筛选器。
+   改法：抽屉压成一行**横滑 chip 常驻**（主筛选项就 4 个，一眼看完、一点即筛），
+   标签与分享收进「更多筛选」开关（默认收起），卡片因此落在首屏。
+   桌面端一切照旧：开关被 display:none 藏掉，.filt-body 就是个普通 div。 */
 @media (max-width:800px){
   .layout{flex-direction:column}
-  aside{width:100%;position:static;max-height:none;padding:16px 12px 0}
-  main.list{padding:12px 12px 80px}
-  .taggroup .chips{flex-wrap:nowrap;overflow-x:auto;padding-bottom:4px}
+  aside{width:100%;position:static;max-height:none;padding:12px 12px 0}
+
+  /* 抽屉：一行横滑 chip。h3 收起来——「全部素材 / 城市与公共空间 / …」
+     本身已经读得懂，留着标题只是占掉一行高度。 */
+  aside .sec:first-child > h3{display:none}
+  aside .sec:first-child{margin-bottom:0}
+  #navCats{display:flex;gap:6px;overflow-x:auto;padding:0 0 6px;
+    scrollbar-width:none;-webkit-overflow-scrolling:touch}
+  #navCats::-webkit-scrollbar{display:none}
+  #navCats .nav-item{
+    width:auto;flex:none;padding:6px 12px;border-radius:20px;
+    border:1px solid var(--line-2);background:#fff;gap:6px;font-size:13px;
+  }
+  #navCats .nav-item:hover{background:#fff}
+  #navCats .nav-item.on{background:var(--ink);border-color:var(--ink);color:#fff}
+  #navCats .nav-item .n{flex:none;max-width:9em}
+  #navCats .nav-item .c{font-size:11.5px}
+
+  /* 「更多筛选」开关：夹在抽屉与内容之间，收起时只占一行 */
+  .filt-toggle{
+    display:flex;align-items:center;gap:8px;width:100%;
+    padding:9px 2px;margin:0;font-size:13px;color:var(--ink-2);
+    border-top:1px solid var(--line);
+  }
+  .filt-toggle .ft-a{margin-left:auto;color:var(--ink-3);font-size:11px;transition:transform .18s}
+  aside.open .filt-toggle .ft-a{transform:rotate(180deg)}
+
+  .filt-body{display:none}
+  aside.open .filt-body{display:block;padding:12px 0 4px;border-top:1px solid var(--line)}
+  .filt-body .sec:last-child{margin-bottom:8px}
+
+  main.list{padding:14px 12px 80px}
+
+  /* 标签组各占一行、组内横滑：组数多也不至于把侧栏顶到一屏高 */
+  .taggroup .chips{flex-wrap:nowrap;overflow-x:auto;padding-bottom:4px;
+    scrollbar-width:none;-webkit-overflow-scrolling:touch}
+  .taggroup .chips::-webkit-scrollbar{display:none}
 }
 
 @media (max-width:640px){
   main.narrow{padding:16px 12px 90px}
   .grid{grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px}
+
+  /* 两列时卡片只有约 177px 宽，抽屉名 + 日期挤在一行会差几个像素放不下，
+     抽屉名就折成两行（「建筑与构筑 / 物」）。收紧内边距与字号让它稳在一行，
+     再加 nowrap + 省略号兜住「城市与公共空间」这种更长的抽屉名。 */
+  .crow-cat{padding:8px 10px 0;gap:6px;font-size:11.5px}
+  .crow-cat .date{font-size:11px}
+  .crow-cat > span:first-child{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 }
 
 /* ---------- 顶栏在窄屏 ---------- */

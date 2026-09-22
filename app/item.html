@@ -26,12 +26,16 @@
 
 
 
-  .covacts{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
-  .covrow{display:flex;gap:8px;align-items:center;font-size:12px;color:var(--ink-3);margin-top:10px;flex-wrap:wrap}
-
-
   .fields .fl:first-of-type{margin-top:6px}
   .ro.small{font-size:12.5px;color:var(--ink-2)}
+
+  /* 三段总结（理念 / 做法 / 效果）——访客看到的是排版好的三行，不是只读文本框。
+     这条内容存在的意义就是被读（凭它决定要不要点进原文），挤成一坨就白费了。
+     标签固定两字宽（2 字 × 13.5px ≈ 27px，给到 34px 留出间隙），三行左边缘对齐。 */
+  .dgrow{display:flex;gap:8px;font-size:13.5px;line-height:1.62;color:var(--ink);margin-bottom:6px}
+  .dgrow b{flex:none;width:34px;font-weight:500;color:var(--ink-2)}
+  .dgrow span{min-width:0;word-break:break-word}
+  .dgrow:last-child{margin-bottom:0}
 
   /* F5-6：AI 原先的猜测留在选项上，用黄色虚线框标出来供对照 */
   .chip.pickable{cursor:pointer}
@@ -39,6 +43,19 @@
   .chip.aiguess{border:1.5px dashed #BA7517}
   .chip.cur{outline:1.5px solid currentColor;outline-offset:-1px}
   .aiguessline{font-size:11.5px;color:var(--warn);background:var(--warnb);border-radius:6px;padding:5px 9px;margin-top:8px;display:inline-block}
+
+  /* 访客态：chip 点不动，就别给它能点的样子（2026-09-22）。
+     上一版只有 cursor 的差别，而 cursor 只有悬停时才看得见 —— 等于没提示，
+     用户照样去点（真实反馈）。现在四处一起收：
+       ① 一句「只读」说明（.roline，文案在 renderFields 里）；
+       ② 光标收回默认；③ 悬停不再变淡（变淡本身就是「可点」的暗号）；
+       ④ AI 的黄框在访客那儿换成灰字（见 aiNote()）—— 黄色是在喊「来处理我」。 */
+  .roline{
+    font-size:12px;color:var(--ink-3);background:#F7F5F1;
+    border:1px dashed var(--line-2);border-radius:7px;padding:7px 10px;margin-bottom:12px;
+  }
+  body:not(.is-owner) .chip{cursor:default}
+  body:not(.is-owner) .chip:hover{opacity:1}
 
   .tagadd{width:104px;border:1px dashed var(--line-2);border-radius:20px;padding:5px 9px;font-size:12px;outline:none}
 
@@ -49,6 +66,69 @@
   .danger .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
   .btn.del{background:#B3261E}
   .btn.del:hover{opacity:.9}
+
+  /* 封面来历那一行（「从截图裁出主体」「取自原文网页」）。2026-09-22 从 h2 旁边
+     挪到图下面——卡片标题不再只讲封面。空的时候整块不占位。 */
+  .covnote{font-size:11.5px;color:var(--ink-3);margin-top:8px}
+  .covnote:empty{display:none}
+  /* 项目名称 + 摘要搬进封面卡片后装在这里（2026-09-22） */
+  #coverFields{margin-top:2px}
+  /* 左栏现在只有一张卡片、还装了名称与摘要，把封面图的高度上限收一点，
+     否则 900px 高的窗口下整栏会顶到 .col-media 的 max-height（100vh-92px）
+     而在栏内出现滚动条——多图素材实测溢出 22px。30vh 留出约 14px 余量。 */
+  .coverbox img{max-height:30vh}
+
+  /* 右栏底部那条常驻保存（2026-09-22）。sticky bottom：这一栏比视口高，
+     所以滚到哪儿它都在，滚到最底才归位到内容末尾。 */
+  .savebar{
+    position:sticky;bottom:0;z-index:5;
+    display:flex;align-items:center;gap:12px;
+    padding:12px 14px;border-radius:10px;
+    background:rgba(255,255,255,.94);backdrop-filter:blur(6px);
+    border:1px solid var(--line);box-shadow:0 6px 18px rgba(0,0,0,.06);
+  }
+  .savebar .hint{font-size:12px;color:var(--ink-3);flex:1}
+  /* 手机端这一条只给一句，否则提示自己就占两行，把保存条撑成一块 */
+  .savebar .hint-short{display:none}
+  @media (max-width:800px){
+    .savebar .hint-long{display:none}
+    .savebar .hint-short{display:inline}
+  }
+  /* 「有没保存的东西」要看得见：这些字段不是即改即存，改完不点就白改 */
+  .savebar.dirty{border-color:#BA7517;background:var(--warnb)}
+  .savebar.dirty .hint{color:var(--warn)}
+
+  /* 窄屏（≤980px，.dcols 已竖排成单列）：sticky 钉不住。
+     sticky 的活动范围被**包含块**框住，而它的包含块就是 .col-fields 自己。
+     单列时 .col-fields 被更高的左栏（封面 + 名称 + 摘要 + 缩略图）顶到首屏
+     之外，于是 bottom:0 只能把它压在这一栏顶端 —— 视口里根本看不见。
+     实测 390×844：滚动 0 时 barTop=944，而视口只有 844px。
+     所以窄屏换成 fixed：脱离文档流钉在窗口底部，与这一栏多高、在哪儿无关。
+     （祖先里没有 transform/filter/will-change，fixed 不会被降级成 absolute。） */
+  @media (max-width:980px){
+    .savebar{
+      position:fixed;left:0;right:0;bottom:0;z-index:60;
+      border-radius:0;border-left:0;border-right:0;border-bottom:0;
+      padding:10px 14px calc(10px + env(safe-area-inset-bottom, 0px));
+      box-shadow:0 -6px 18px rgba(0,0,0,.08);
+    }
+    /* 这一条是浮在内容上的，给正文留出等高的底边距，别盖住最后一张卡片 */
+    main.detail{padding-bottom:112px}
+  }
+
+  /* 折叠卡片：记录 / 管理。用原生 details，不写 JS 开关。 */
+  .panel.fold{padding:0}
+  .panel.fold > summary{
+    list-style:none;cursor:pointer;padding:15px 18px;
+    display:flex;align-items:baseline;gap:10px;font-size:15px;font-weight:500;
+  }
+  .panel.fold > summary::-webkit-details-marker{display:none}
+  .panel.fold > summary::after{content:'▾';margin-left:auto;font-size:11px;color:var(--ink-3);transition:transform .18s}
+  .panel.fold[open] > summary::after{transform:rotate(180deg)}
+  .panel.fold > summary .muted{font-weight:400;font-size:12px}
+  .foldbody{padding:0 18px 18px}
+  .subttl{font-size:12.5px;font-weight:500;color:var(--ink-2);margin:16px 0 8px}
+  .subttl:first-child{margin-top:0}
 
 </style>
 </head>
@@ -80,19 +160,38 @@
 
     <div class="dcols">
       <section class="col-media">
+        <!-- 这张卡片 2026-09-22 收了两轮改动：
+             ① 「全部原图」那张独立卡片取消（单图时它就是一句「库里没有原图」的空转；
+                多图时真正要的东西只有「换封面」，而那是封面自己的事）。
+             ② 「项目名称 + 摘要」从右栏并进来（用户拍板：封面图和这两样合起来才是
+                「这条素材是什么」，分成两张卡片摆一左一右是割裂的）。
+             所以现在左栏只有一张卡片，标题也从「封面」改成了「基本信息」。 -->
         <div class="panel">
-          <h2>封面 <span class="muted" id="coverNote"></span></h2>
+          <h2>基本信息</h2>
           <div class="coverbox" id="coverBox"></div>
+          <!-- 封面的来历（「从截图裁出主体」「取自原文网页」）。从 h2 旁边挪到图下面：
+               卡片标题不再只讲封面，这句挂在图下面才是它该在的位置。 -->
+          <div class="covnote" id="coverNote"></div>
+          <!-- 「去哪儿看原件」的唯一入口：网址素材 → 跳原文网址；图片素材 → 看原图。
+               原先这个链接在右栏「来源」卡片里，离封面一整屏，用户找不到。 -->
+          <div class="covgo" id="coverGo"></div>
+          <div id="coverFields"></div>
           <div class="covacts owner-only" id="coverActs"></div>
-          <div class="covrow" id="coverRow"></div>
-        </div>
-        <div class="panel">
-          <h2>全部原图 <span class="muted" id="imgNote"></span></h2>
           <div class="shots" id="shots"></div>
+          <div class="covrow" id="coverRow"></div>
         </div>
       </section>
 
-      <section class="col-fields fields" id="fields"></section>
+      <div class="col-fields">
+        <section class="fields" id="fields"></section>
+        <!-- 保存条常驻右栏底部（2026-09-22）。原先那颗「保存以上字段」只画在
+             「AI 读出来的」panel 里，可它一次存 7 个字段——包括最上面「基本信息」的
+             项目名称与摘要。改了顶上的字要滚过 5 张卡片才找得到保存键，很容易白改。 -->
+        <div class="savebar owner-only" id="saveBar">
+          <span class="hint"><span class="hint-long">改了卡片里的字点右边保存；抽屉、标签、来源点了就存</span><span class="hint-short">改完点右边保存</span></span>
+          <button class="btn sm" data-act="save-fields">保存修改</button>
+        </div>
+      </div>
     </div>
   </div>
 </main>
@@ -193,6 +292,10 @@
         // 用服务端回来的行刷新本地模型，保证界面与库一致
         if (saved) state.item = saved;
         render();
+        // 存成功了就把保存条上的「有未保存改动」标记撤掉（它在 #fields 之外，
+        // render() 换掉 innerHTML 不会碰到它）
+        var bar = $('saveBar');
+        if (bar) bar.classList.remove('dirty');
         toast(okMsg || '已保存');
       }).catch(function (e) {
         toast('保存失败：' + fmtErr(e));
@@ -206,7 +309,7 @@
 
   function coverNoteText() {
     var it = state.item;
-    if (!it.cover_thumb) return '（这条没有封面）';
+    if (!it.cover_thumb) return '';   // 没有封面时不说这句：图区自己会说明原因，别讲两遍
     if (it.cover_source === 'crop') return '从截图裁出主体';
     if (it.cover_source === 'raw') return '整图（未裁）';
     // 2026-09-21 新增：只填网址时封面是从原文网页抓来的，库里没有原件
@@ -237,22 +340,45 @@
   function renderCover() {
     var it = state.item;
     var box = $('coverBox');
+    var ci = it.cover_index || 0;
     // cover_source === 'link'：封面来自原文网页的抓取，item_images 里**没有**原件。
-    // 这决定了三件事：不能重裁、不能「看第 N 张」、无封面时的文案要说清不是坏了。
     var linkCover = it.cover_source === 'link';
-    box.innerHTML = it.cover_thumb
-      ? '<img src="' + S.toDataUrl('image/jpeg', it.cover_thumb) + '" data-act="zoom" data-i="' + (it.cover_index || 0) + '" alt="封面">'
-      : (it.source_url
-          ? '<div class="none">这条来自原文链接<br>没抓到封面，'
-            + '<a href="' + esc(it.source_url) + '" target="_blank" rel="noopener">打开原文看</a></div>'
-          : '<div class="none">这条素材没有配图<br>纯文本的灵感照样进库</div>');
+    var hasImgs = state.imgs.length > 0;
+
+    // 大图区。**点它去哪儿由素材类型决定**（2026-09-22 用户拍板）：
+    //   有本地原件 → 放大看原图（一直如此）
+    //   只抓了网页 → 新标签打开原文网址
+    // 后者原先点了**没有任何反应**：data-act 写死 zoom，而 zoom() 读 state.imgs[ci]，
+    // link 素材的 imgs 是空的，函数第一行就 return 了。
+    if (it.cover_thumb) {
+      box.className = 'coverbox' + (linkCover ? ' c-link' : '');
+      box.innerHTML = '<img src="' + S.toDataUrl('image/jpeg', it.cover_thumb) + '" '
+        + 'data-act="' + (linkCover ? 'open-src' : 'zoom') + '" data-i="' + ci + '" alt="封面">';
+    } else {
+      box.className = 'coverbox';
+      box.innerHTML = it.source_url
+        ? '<div class="none">这条是网址素材，没抓到封面图</div>'
+        : '<div class="none">这条素材没有配图<br>纯文本的灵感照样进库</div>';
+    }
     $('coverNote').textContent = coverNoteText();
 
-    // F5-8：只有所有者能看到换封面的入口
-    var ci = it.cover_index || 0;
+    // 「去哪儿看原件」的唯一入口。有原图给「查看原图」，有链接给「跳转原文网址」——
+    // 两个都是链接，所以任何一条素材都至少有一个出口，不会再出现「点了没反应」。
+    // 原先这个链接在右栏「来源」卡片里，离封面一整屏，用户找不到（2026-09-22）。
+    var go = [];
+    if (hasImgs) {
+      go.push('<button class="linkbtn" data-act="zoom" data-i="' + ci + '">查看原图</button>');
+    }
+    if (it.source_url) {
+      go.push('<a class="linkbtn" href="' + esc(it.source_url) + '" target="_blank" rel="noopener">跳转原文网址 ↗</a>');
+    }
+    $('coverGo').innerHTML = go.join(' ');
+
+    // F5-8：换封面 / 重裁的入口。只有「有本地原件」时才存在——
+    // 抓来的网页封面没有原件，没有可裁的东西，按钮就不该出现。
     var rect = rectFor(ci);
     var acts = [];
-    if (it.cover_thumb && !linkCover) {
+    if (hasImgs) {
       if (it.cover_source !== 'raw') {
         acts.push('<button class="btn ghost sm" data-act="cover-raw">用整图（不裁）</button>');
       }
@@ -264,62 +390,77 @@
         acts.push('<button class="btn ghost sm" data-act="cover-crop">让 AI 判这张图的画面区（要等一会儿）</button>');
       }
     }
-    if (linkCover) {
-      acts.push('<span class="muted">封面是从原文网页抓来的，库里没有原件，所以没有重裁可做</span>');
-    }
-    $('coverActs').innerHTML = acts.join('') || '<span class="muted">没有可用的封面操作</span>';
+    $('coverActs').innerHTML = acts.join('');
 
+    // 信息行只在有本地原件时给。link 素材原先在这张卡片里把「库里没有原件」说了三遍
+    // （标题旁、按钮行、这一行），那是用户 2026-09-22 点名的冗余。
     var rows = [];
-    if (linkCover) {
-      rows.push('封面取自原文网页（库里没有原件）');
-    } else {
+    if (hasImgs) {
       rows.push('封面取第 ' + (ci + 1) + ' 张');
-    }
-    rows.push('封面来源 ' + (it.cover_source || '—'));
-    if (rect) {
-      rows.push('这张图的 AI 矩形 ' + rect.left + '/' + rect.top + '/' + rect.right + '/' + rect.bottom + '%');
-    } else if (it.ai_raw && it.ai_raw.rect) {
-      // 有矩形但不在当前这张图上：如实说明它属于哪张，不要拿它冒充当前图的
-      rows.push('AI 矩形是录入时那张图的，换封面后对这张不适用');
-    } else if (it.ai_raw) {
-      rows.push('AI 没给可用矩形');
-    } else {
-      // 旧素材：ai_raw 这一列是后加的，那时候 AI 到底给没给矩形已经查不到了。
-      // 这里不能顺口说「AI 没给」——那是在断言一个我不知道的事实。
-      rows.push('这条早于「记录 AI 原值」上线，矩形没留下来');
+      rows.push('封面来源 ' + (it.cover_source || '—'));
+      if (rect) {
+        rows.push('这张图的 AI 矩形 ' + rect.left + '/' + rect.top + '/' + rect.right + '/' + rect.bottom + '%');
+      } else if (it.ai_raw && it.ai_raw.rect) {
+        // 有矩形但不在当前这张图上：如实说明它属于哪张，不要拿它冒充当前图的
+        rows.push('AI 矩形是录入时那张图的，换封面后对这张不适用');
+      } else if (it.ai_raw) {
+        rows.push('AI 没给可用矩形');
+      } else {
+        // 旧素材：ai_raw 这一列是后加的，那时候 AI 到底给没给矩形已经查不到了。
+        // 这里不能顺口说「AI 没给」——那是在断言一个我不知道的事实。
+        rows.push('这条早于「记录 AI 原值」上线，矩形没留下来');
+      }
     }
     $('coverRow').innerHTML = rows.map(function (r) { return '<span>' + esc(r) + '</span>'; }).join('<span>·</span>');
+
+    // 项目名称与摘要（2026-09-22 从右栏并进来）。渲染放在这张卡片的函数里，
+    // 因为它们和封面图属于同一个「这条素材是什么」的块。
+    $('coverFields').innerHTML = coverFieldsHtml();
   }
 
+  // 原先它是右栏第一张卡片「基本信息」。并进来的理由：封面图和名字/摘要分开摆
+  // 一左一右，眼睛要在两栏之间来回跳；合起来才是这个素材的身份块。
+  // 注意 id 没变（fTitle / fSummary）——保存条那边一次读 7 个字段，靠的就是它们。
+  function coverFieldsHtml() {
+    var it = state.item;
+    var owner = A.isOwner();
+    var h = [];
+    h.push('<label class="fl">项目名称 <span class="muted">卡片上显示的就是这个</span></label>');
+    h.push(owner
+      ? '<input class="inp" id="fTitle" value="' + esc(it.ai_title || '') + '" maxlength="20" placeholder="案例或项目名，比如「纽约高线公园」">'
+      : (it.ai_title ? ro(it.ai_title) : '<div class="ro empty">未命名</div>'));
+    h.push('<label class="fl">摘要</label>');
+    h.push(owner
+      ? '<input class="inp" id="fSummary" value="' + esc(it.ai_summary || '') + '" placeholder="一句话摘要">'
+      : ro(it.ai_summary));
+    return h.join('');
+  }
+
+  // 多图素材的换封面条。「全部原图」那张独立卡片 2026-09-22 取消（用户拍板），
+  // 职能并进封面卡片：单图/无图时整块不渲染（原来它是一张只有一句「库里没有原图」
+  // 的空转卡片），多图时才出现——因为多图唯一非它不可的用途是「换封面」。
   function renderShots() {
     var it = state.item;
     var ci = it.cover_index || 0;
-    if (!state.imgs.length) {
-      // 只填网址的素材就是这样：封面是从原文抓来的，库里没有原件。
-      // 说清原因，否则会被当成「图片丢了」。
-      $('shots').innerHTML = it.source_url
-        ? '<div class="muted">这条是存链接进来的，库里没有原图；封面（如果有）是从原文网页抓的。'
-          + '要看内容请走上面的「原文」。</div>'
-        : '<div class="muted">这条没有图片</div>';
-      $('imgNote').textContent = '';
-      return;
-    }
+    var box = $('shots');
+    if (state.imgs.length < 2) { box.innerHTML = ''; return; }
     var owner = A.isOwner();
-    $('imgNote').textContent = '共 ' + state.imgs.length + ' 张，点开可放大（F5-7 原件永不被裁掉）';
-    $('shots').innerHTML = state.imgs.map(function (im, i) {
-      var on = i === ci;
-      return '<div class="shot-t' + (on ? ' t-on' : '') + '">'
-        + '<div data-act="zoom" data-i="' + i + '">'
-        + (on ? '<span class="pick">封面</span>' : '')
-        + '<img src="' + S.toDataUrl(im.mime, im.data_base64) + '" alt="" loading="lazy">'
-        + '</div>'
-        + '<div class="lb"><span>第 ' + (i + 1) + ' 张</span><span>' + im.width + '×' + im.height + '</span></div>'
-        // F5-8「重新指定封面」：多图时才需要选，单图时这个按钮没有意义
-        + (owner && state.imgs.length > 1 && !on
-            ? '<button class="linkbtn" style="width:100%;border-radius:0;border-left:0;border-right:0;border-bottom:0;text-align:center" data-act="cover-use" data-i="' + i + '">用这张当封面</button>'
-            : '')
-        + '</div>';
-    }).join('');
+    box.innerHTML = '<div class="shots-hint">共 ' + state.imgs.length + ' 张'
+      + (owner ? '，点「用这张当封面」换封面' : '，点开可放大')
+      + '（原件永不被裁掉）</div>'
+      + state.imgs.map(function (im, i) {
+        var on = i === ci;
+        return '<div class="shot-t' + (on ? ' t-on' : '') + '">'
+          + '<div data-act="zoom" data-i="' + i + '">'
+          + (on ? '<span class="pick">封面</span>' : '')
+          + '<img src="' + S.toDataUrl(im.mime, im.data_base64) + '" alt="" loading="lazy">'
+          + '</div>'
+          + '<div class="lb"><span>第 ' + (i + 1) + ' 张</span><span>' + im.width + '×' + im.height + '</span></div>'
+          + (owner && !on
+              ? '<button class="linkbtn" style="width:100%;border-radius:0;border-left:0;border-right:0;border-bottom:0;text-align:center" data-act="cover-use" data-i="' + i + '">用这张当封面</button>'
+              : '')
+          + '</div>';
+      }).join('');
   }
 
   /* ---------- 渲染：字段区 ---------- */
@@ -329,13 +470,30 @@
     return '<div class="ro empty ' + (cls || '') + '">（空）</div>';
   }
 
-  function refLinkHtml() {
-    var it = state.item;
-    var parts = [];
-    if (it.source_url) {
-      parts.push('<a class="linkbtn" href="' + esc(it.source_url) + '" target="_blank" rel="noopener">在原帖打开</a>');
+  // 三段总结（理念 / 做法 / 效果）。
+  //
+  // 两种身份两种形态，理由与其它 AI 字段一致（所有者要能改、访客只能读），
+  // 但**访客那一版特意做成排版好的三行**而不是 ro()：这条内容存在的意义就是
+  // 被读，段落挤成一坨会白费。标签加粗，扫一眼就知道哪句是理念哪句是效果。
+  //
+  // 容错：标签可能不存在（AI 只给一段，或还没跑过）。所以按行切、能认出标签就
+  // 加粗，认不出就整行当普通文字——绝不替模型编一个「理念：」上去。
+  var DIGEST_LINE = /^(理念|做法|效果)\s*[：:]\s*([\s\S]*)$/;
+  function digestHtml(v, owner) {
+    if (owner) {
+      return '<textarea class="inp" id="fDigest" style="min-height:88px"'
+        + ' placeholder="三行，每行依次以「理念：」「做法：」「效果：」开头，整段不超过 120 字">'
+        + esc(v || '') + '</textarea>';
     }
-    return parts.join(' ');
+    var rows = String(v || '').split('\n').map(function (ln) {
+      ln = String(ln).trim();
+      if (!ln) return '';
+      var m = DIGEST_LINE.exec(ln);
+      return m
+        ? '<div class="dgrow"><b>' + esc(m[1]) + '</b><span>' + esc(m[2]) + '</span></div>'
+        : '<div class="dgrow"><span>' + esc(ln) + '</span></div>';
+    }).join('');
+    return rows || '<div class="ro empty">（空）</div>';
   }
 
   /* ---------- 改动对照（F2-8） ---------- */
@@ -343,24 +501,26 @@
   // 比较规则不写在这里，在 diff.js —— 数据页要按同一套规则算「修改率」（A2 的判据），
   // 两处各写一份迟早会给出两个答案（详情页说改了 3 处、数据页说 2 处）。
   // 这一页只负责把结果画出来。
+  //
+  // 只返回**内容**，不返回 panel 外壳与 h2（2026-09-22）：它现在住进「记录」那张
+  // 折叠卡片里，和外层标题重复就是又一处冗余。
   function diffHtml(it) {
-    var head = '<h2>改动对照 <span class="muted">AI 原值 → 现在</span></h2>';
+    var head = '<div class="subttl">改动对照 <span class="muted">AI 原值 → 现在</span></div>';
 
     if (!it.ai_raw) {
       // 旧素材：ai_raw 是 v7 才加的列。这里要如实说是「没留下来」，
       // 不能写成「没改过」——那是在断言一个我不知道的事实。
-      return '<div class="panel">' + head
+      return head
         + '<div class="muted">这条早于「记录 AI 原值」上线，AI 当时给的是什么没留下来，'
-        + '所以算不出差异。新收的素材都会有。</div></div>';
+        + '所以算不出差异。新收的素材都会有。</div>';
     }
 
     var rows = D.changed(it);
     if (!rows.length) {
-      return '<div class="panel">' + head
-        + '<div class="muted">和 AI 给的一模一样，一处没改。</div></div>';
+      return head + '<div class="muted">和 AI 给的一模一样，一处没改。</div>';
     }
 
-    var h = ['<div class="panel">' + head, '<div class="difflist">'];
+    var h = [head, '<div class="difflist">'];
     rows.forEach(function (r) {
       h.push('<div class="diffrow"><b>' + esc(r.label) + '</b>'
         + '<span class="was">' + esc(r.before || '（空）') + '</span>'
@@ -371,37 +531,80 @@
     h.push('</div>');
     h.push('<div class="muted" style="margin-top:10px">「原值」来自 AI 最近一次成功识别的快照，'
       + '改动永远不会覆盖它，所以这一列永远是真的。</div>');
-    h.push('</div>');
     return h.join('');
   }
 
+  // 右栏结构（2026-09-22 用户拍板）：
+  //   基本信息**已在左栏封面卡片里**（见 coverFieldsHtml），所以右栏从这里开始：
+  //   1 设计说明总结（理念/做法/效果 三段）
+  //   2 归类（抽屉 + 标签）
+  //   3 来源（平台 + 链接）
+  //   4 我为什么存它
+  //   5 文本（网页标题 + 画面描述 + 图中文字 + 自己粘的原文）
+  //   6 记录（改动对照 + 时间，折叠）
+  //   7 管理（分享 + 删除，折叠，仅所有者）
+  // 另加一条常驻的保存条（在 #fields 之外的 #saveBar，见 HTML 注释）。
   function renderFields() {
     var it = state.item;
     var owner = A.isOwner();
     var ai = it.ai_raw || {};
     var h = [];
 
-    /* 项目名称（卡片的显示名，所以放在最上面） */
-    h.push('<div class="panel"><h2>项目名称 <span class="muted">卡片上显示的就是这个</span></h2>');
-    h.push(owner
-      ? '<input class="inp" id="fTitle" value="' + esc(it.ai_title || '') + '" maxlength="20" placeholder="案例或项目名，比如「纽约高线公园」">'
-      : (it.ai_title ? ro(it.ai_title) : '<div class="ro empty">未命名</div>'));
-    if (owner) {
-      h.push('<div class="muted" style="margin-top:6px">'
-        + (it.ai_title ? '改了要跟下面一起点保存。' : 'AI 没判出名字，可以直接填。')
-        + '</div>');
+    /* ---- 1 设计说明总结（2026-09-22 新增） ----
+       为什么单独一张卡而不是并进「基本信息」的摘要里：
+       两者用途不同，长度也差一个量级。摘要（≤50 字）是给列表卡片认人用的，
+       只显示两行；digest（≈120 字、三段）回答的是「这份设计说明讲了什么、
+       值不值得点进原文」。硬塞成一份的话，卡片上永远只看到第一段。 */
+    var dg = it.ai_digest || '';
+    var pageText = it.page_text || '';
+    // 既没抓到正文、也没有总结时，访客看到的会是一张空卡 + 一句「待补」，
+    // 不如不显示。所有者例外：那里面是他自己补写的入口。
+    if (dg || pageText || owner) {
+      h.push('<div class="panel"><h2>设计说明总结</h2>');
+      if (dg) {
+        h.push(digestHtml(dg, owner));
+      } else {
+        h.push('<div class="muted" style="margin-bottom:10px">'
+          + (pageText
+              // 有正文却没总结，说明 AI 拿到正文后仍判它「不是设计项目」。
+              // 这是 id=8 那类奖项榜单页的预期结果，不是失败。
+              ? 'AI 读了正文，判这条不是设计项目（新闻 / 榜单 / 合集），没有输出三段总结。'
+              : '这条没抓到可读的网页正文（小红书、公众号这类没有），总结待补。')
+          + '</div>');
+        if (owner) {
+          h.push(digestHtml('', true));
+        }
+      }
+      if (pageText) {
+        h.push('<div class="covnote">总结依据：抓到的网页正文 ' + pageText.length + ' 字。</div>');
+      }
+      h.push('</div>');
     }
-    h.push('</div>');
 
-    /* 摘要 */
-    h.push('<div class="panel"><h2>摘要</h2>');
-    h.push(owner
-      ? '<input class="inp" id="fSummary" value="' + esc(it.ai_summary || '') + '" placeholder="一句话摘要">'
-      : ro(it.ai_summary));
-    h.push('</div>');
+    /* ---- 2 归类：抽屉 + 标签（都是「点了立即保存」，所以放同一张卡片） ---- */
 
-    /* 抽屉（F5-2：改了立即保存） */
-    h.push('<div class="panel"><h2>抽屉 <span class="muted">封闭集合，改了立即保存</span></h2>');
+    // 同一句「AI 原来的判断」，两种身份要两种读法：
+    //   所有者看到的是**待我处理的差异**（黄框，是提醒）；
+    //   访客看到的是**背景信息**（灰字，是叙述）。
+    // 用同一个函数而不是散在四处三元表达式，免得将来只改了一处。
+    function aiNote(inner) {
+      return owner
+        ? '<div class="aiguessline">' + inner + '</div>'
+        : '<div class="muted" style="margin-top:8px">' + inner + '</div>';
+    }
+
+    h.push('<div class="panel"><h2>归类</h2>');
+
+    // 访客态降级（2026-09-22）：这些 chip 点不动，就不该长得像能点。
+    // 光靠一行小灰字是拦不住的——上一版就是这样，用户照样去点（真实反馈）。
+    // 所以这里三件事一起做：① 明写一句「只读」并说清为什么；② 把所有
+    // 「点了会怎样」的操作指引全收掉；③ 光标与悬停反馈收回去（见样式）。
+    if (!owner) {
+      h.push('<div class="roline">只读视图：抽屉、标签、来源都由所有者维护，这里点了不会有反应。</div>');
+    }
+
+    h.push('<label class="fl">抽屉'
+      + (owner ? ' <span class="muted">封闭集合，点了立即保存</span>' : '') + '</label>');
     h.push('<div class="chips" id="catChips">'
       + state.taxonomy.categories.map(function (c) {
           return tagChip(c.name, c.name === it.category, {
@@ -412,16 +615,18 @@
         }).join('')
       + '</div>');
     if (ai.category && ai.category !== it.category) {
-      h.push('<div class="aiguessline">AI 原本判的是「' + esc(ai.category) + '」'
+      h.push(aiNote('AI 原本判的是「' + esc(ai.category) + '」'
         + (ai.categoryOutOfList ? '（原话「' + esc(ai.categoryOutOfList) + '」不在清单里，已落兜底）' : '')
-        + '，现在是「' + esc(it.category || '未归类') + '」。</div>');
+        + '，现在是「' + esc(it.category || '未归类') + '」。'));
     } else if (ai.category) {
-      h.push('<div class="muted" style="margin-top:8px">沿用 AI 的判断，没改过。</div>');
+      // 「没改过」是所有者视角的话（我改没改），访客版只说事实
+      h.push('<div class="muted" style="margin-top:8px">沿用 AI 的判断'
+        + (owner ? '，没改过。' : '。') + '</div>');
     }
-    h.push('</div>');
 
-    /* 标签（F5-2：增删立即保存） */
-    h.push('<div class="panel"><h2>标签 <span class="muted">AI 打的标虚线框，我加的实线</span></h2>');
+    h.push('<label class="fl">标签'
+      + (owner ? ' <span class="muted">AI 打的标虚线框，我加的实线，点了立即保存</span>'
+               : ' <span class="muted">虚线框是 AI 打的，实线是所有者加的</span>') + '</label>');
     h.push('<div class="chips" id="tagChips">');
     var aiTags = it.ai_tags || [], myTags = it.my_tags || [];
     if (!aiTags.length && !myTags.length) {
@@ -438,12 +643,16 @@
     if (owner) h.push('<input class="tagadd" id="tagAdd" data-act="addtag" placeholder="+ 加标签" maxlength="12">');
     h.push('</div>');
     if (aiTags.length) {
-      h.push('<div class="aiguessline">虚线框的 ' + aiTags.length + ' 个是 AI 打的；把 AI 的标签点掉就表示我不同意它。</div>');
+      // 「点掉就表示我不同意它」是一句**操作指引**。访客做不到，说出来只会让人
+      // 去找那颗点不动的 chip —— 这正是「看起来能点却不能点」的来源。
+      h.push(aiNote('虚线框的 ' + aiTags.length + ' 个是 AI 打的'
+        + (owner ? '；把 AI 的标签点掉就表示我不同意它。' : '。')));
     }
     h.push('</div>');
 
-    /* 来源（F5-6） */
-    h.push('<div class="panel"><h2>来源 <span class="muted">平台不对可以直接改</span></h2>');
+    /* ---- 3 来源（F5-6）。「在原帖打开」的链接搬到封面卡片了，这里只留可编辑的平台与网址 ---- */
+    h.push('<div class="panel"><h2>来源'
+      + (owner ? ' <span class="muted">平台不对可以直接改</span>' : '') + '</h2>');
     var cur = it.source_platform || '';
     var inList = cfg.platforms.indexOf(cur) >= 0;
     h.push('<div class="chips" id="platChips">'
@@ -464,87 +673,109 @@
       h.push('<div class="muted" style="margin-top:8px">来源名：' + esc(cur) + '</div>');
     }
     if (ai.platform && ai.platform !== cur) {
-      h.push('<div class="aiguessline">AI 原本猜的是「' + esc(ai.platform) + '」（黄色虚线框那个），现在是「'
-        + esc(cur || '未填') + '」。</div>');
+      h.push(aiNote('AI 原本猜的是「' + esc(ai.platform) + '」'
+        + (owner ? '（黄色虚线框那个）' : '') + '，现在是「' + esc(cur || '未填') + '」。'));
     } else if (ai.platform) {
-      h.push('<div class="muted" style="margin-top:8px">沿用 AI 的判断，没改过。</div>');
+      h.push('<div class="muted" style="margin-top:8px">沿用 AI 的判断'
+        + (owner ? '，没改过。' : '。') + '</div>');
     }
 
-    h.push('<label class="fl">来源链接</label>');
+    h.push('<label class="fl">来源链接 <span class="muted">封面卡片上那颗「跳转原文网址」用的就是它</span></label>');
     if (owner) {
       h.push('<input class="inp" id="fUrl" value="' + esc(it.source_url || '') + '" placeholder="原文网址">');
     } else {
       h.push(ro(it.source_url, 'small'));
     }
-    h.push('<div class="covacts">' + (refLinkHtml() || '<span class="muted">没有链接</span>') + '</div>');
     h.push('</div>');
 
-    /* 我的备注 */
+    /* ---- 4 我的备注 ---- */
     h.push('<div class="panel"><h2>我为什么存它</h2>');
     h.push(owner
       ? '<input class="inp" id="fNote" value="' + esc(it.my_note || '') + '" placeholder="打算用在哪、想拿走什么">'
       : ro(it.my_note));
     h.push('</div>');
 
-    /* AI 读出来的东西 */
-    h.push('<div class="panel"><h2>AI 读出来的 <span class="muted">改过就原文没了，所以另存了一份原值</span></h2>');
-    h.push('<label class="fl">画面描述</label>');
-    h.push(owner ? '<input class="inp" id="fCaption" value="' + esc(it.ai_caption || '') + '">' : ro(it.ai_caption));
-    h.push('<label class="fl">图中文字 <span class="muted">（会被搜索命中）</span></label>');
-    h.push(owner
-      ? '<textarea class="inp" id="fOcr" style="min-height:70px">' + esc(it.ocr_text || '') + '</textarea>'
-      : ro(it.ocr_text, 'small'));
-    if (owner) {
-      h.push('<div class="foot"><span class="hint">这些字段不是改了立刻存，点右边保存。</span>'
-        + '<button class="btn sm" data-act="save-fields">保存以上字段</button></div>');
-    }
-    h.push('</div>');
+    /* ---- 5 文本（AI 读出来的 + 原文，2026-09-22 合并） ---- */
 
-    /* 原文 */
-    h.push('<div class="panel"><h2>原文</h2>');
-    // 抓来的网页标题/描述（2026-09-21 新增）。放在这里而不是混进「原文」里，
-    // 因为两者来源不同：这两行是系统从网页抓的，下面才是用户自己粘贴的。
-    // 也正是这两行让「只填网址」的素材第一次有了可判断的文字依据。
-    if (it.page_title || it.page_desc) {
+    // 这张卡里每一块都是「有内容才显示」。**全都空的时候整张卡不渲染**：
+    // 「只填了网址、又没抓到正文」的素材（实测 id=15 / 11 / 8 就是），
+    // 访客打开会看到一个只有「文本」二字的空卡。
+    // 所有者例外——下面是他的补录入口，空着正是要填的时候。
+    var hasLocalImgs = state.imgs.length > 0;
+    var showRaw = owner || !!it.raw_text;
+    if (it.page_title || hasLocalImgs || showRaw) {
+      h.push('<div class="panel"><h2>文本</h2>');
+
+      // 网页标题：录入时从原文网页抓的（2026-09-21）。它往往是「只填网址」素材里
+      // 信息量最大的一行——原文标题带着 AI 收敛后丢掉的作者与地点。
+      // **网页描述不再显示**（2026-09-22 用户判为无用信息）：它长、信息密度低，
+      // 而且和摘要高度重叠。它**仍然会给 AI 看**（analyze 的 pageDesc 照传），
+      // 只是不再铺到界面上。
       if (it.page_title) {
         h.push('<div class="kv"><b>网页标题</b><span>' + esc(it.page_title) + '</span></div>');
+        h.push('<div class="hint" style="margin:8px 0 4px">这行是录入时从原文网页抓的，'
+          + 'AI 判抽屉与标签时会看到它。</div>');
       }
-      if (it.page_desc) {
-        h.push('<div class="kv"><b>网页描述</b><span>' + esc(it.page_desc) + '</span></div>');
+
+      // 「画面描述 / 图中文字」只有 AI **读过图**才会有值。网址素材库里没有原件
+      // （封面是抓来的，不进 item_images），AI 拿不到图，这两项**恒空**——铺在界面上
+      // 就是三行空框（2026-09-22 用户点名）。所以这里按「这条有没有本地图片」决定
+      // 显不显示，而不是按「值空不空」：图片素材上这两项为空说明 AI 没读出来，
+      // 那是值得看见的信息，要继续显示。抓来的封面**没有**喂给 AI，别误以为会填。
+      if (hasLocalImgs) {
+        h.push('<label class="fl">画面描述</label>');
+        h.push(owner ? '<input class="inp" id="fCaption" value="' + esc(it.ai_caption || '') + '">' : ro(it.ai_caption));
+        h.push('<label class="fl">图中文字 <span class="muted">（会被搜索命中）</span></label>');
+        h.push(owner
+          ? '<textarea class="inp" id="fOcr" style="min-height:70px">' + esc(it.ocr_text || '') + '</textarea>'
+          : ro(it.ocr_text, 'small'));
       }
-      h.push('<div class="hint" style="margin:8px 0 12px">上面两行是录入时从原文网页抓的'
-        + '（title / og:description）。AI 判抽屉与标签时会看到它们；下面这一块才是你自己粘的。</div>');
+
+      // 「原文」是**所有者补录的入口**，不是给人读的内容——它的用途是搜索命中
+      // 与喂 AI 分类（ai.js 的【文本】）。所以空态与上面两项不同：
+      //   · 所有者：永远显示。空着正是要他填的时候，藏起来他就再也补不了。
+      //   · 访客：空着整块不渲染。他没有可补的东西，留着只是一个空框。
+      // （2026-09-22 修正：我起初把这条读成「空就一律不显示」——那会把所有者
+      //   的补录入口一起删掉，原文为空时他彻底没法粘贴文本。）
+      if (showRaw) {
+        h.push('<label class="fl">原文 <span class="muted">你自己粘的那段，'
+          + (it.raw_text ? it.raw_text.length + ' 字' : '现在是空的') + '</span></label>');
+        h.push(owner
+          ? '<textarea class="inp" id="fRaw" style="min-height:110px">' + esc(it.raw_text || '') + '</textarea>'
+          : ro(it.raw_text, 'small'));
+      }
+      h.push('</div>');
     }
-    h.push(owner
-      ? '<textarea class="inp" id="fRaw" style="min-height:110px">' + esc(it.raw_text || '') + '</textarea>'
-        + '<div class="foot"><span class="hint">' + (it.raw_text ? it.raw_text.length + ' 字' : '空') + '</span>'
-        + '<button class="btn sm" data-act="save-raw">保存原文</button></div>'
-      : ro(it.raw_text, 'small'));
-    h.push('</div>');
 
-    /* 改动对照（F2-8） */
-    h.push(diffHtml(it));
-
-    /* 时间与状态 */
-    h.push('<div class="panel"><h2>记录</h2>'
+    /* ---- 6 记录（改动对照 + 时间，折叠） ---- */
+    h.push('<details class="panel fold"><summary><span>记录</span>'
+      + '<span class="muted">改动对照 · 时间与状态</span></summary>'
+      + '<div class="foldbody">'
+      + diffHtml(it)
+      + '<div class="subttl">时间与状态</div>'
       + '<div class="kv"><b>录入时间</b><span>' + esc(fmtTime(it.created_at, true) || '—') + '</span></div>'
       + '<div class="kv"><b>最后改动</b><span>' + esc(fmtTime(it.updated_at, true) || '—') + '</span></div>'
       + '<div class="kv"><b>AI 最近一次</b><span>' + (ai.at ? esc(fmtTime(ai.at, true))
           + (ai.ms ? '（耗时 ' + (ai.ms / 1000).toFixed(1) + 's）' : '') : '没有记录') + '</span></div>'
       + '<div class="kv"><b>素材类型</b><span>' + esc(it.source_type || '—') + '</span></div>'
-      + '</div>');
+      // 正文抓到了多少字（2026-09-22）。放在这儿而不是正文卡片里：
+      // 它是排查用的信息（「为什么这条没有总结」先看这个数），不是给人读的内容。
+      + '<div class="kv"><b>网页正文</b><span>'
+        + (it.page_text ? it.page_text.length + ' 字（抓到了）' : '没有（没抓或抓不到）') + '</span></div>'
+      + '</div></details>');
 
-    /* 分享这一条（F6-2） */
-    h.push('<div class="panel owner-only"><h2>分享这一条 <span class="muted">只读链接，只包含这一条</span></h2>'
-      + '<div id="shareOneBox"><div class="shnone">读取中…</div></div></div>');
-
-    /* 危险区（F5-3，仅所有者） */
-    h.push('<div class="panel owner-only"><h2>删除</h2>'
+    /* ---- 7 管理（分享 + 删除，折叠，仅所有者） ---- */
+    h.push('<details class="panel fold owner-only"><summary><span>管理</span>'
+      + '<span class="muted">分享这一条 · 删除</span></summary><div class="foldbody">'
+      + '<div class="subttl">分享这一条 <span class="muted">只读链接，只包含这一条</span></div>'
+      + '<div id="shareOneBox"><div class="shnone">读取中…</div></div>'
+      + '<div class="subttl">删除</div>'
       + '<div class="muted" style="margin-bottom:10px">删除会连这条的图片一起删掉，删完取不回来。</div>'
       + '<div class="danger"><div class="row">'
       + '<button class="btn del sm" data-act="del1">删除这条素材</button>'
       + '<span class="muted" id="delHint"></span>'
-      + '</div></div></div>');
+      + '</div></div>'
+      + '</div></details>');
 
     $('fields').innerHTML = h.join('');
     renderShareOne();
@@ -746,6 +977,12 @@
 
     var el = t.closest('[data-act]');
     var act = el && el.getAttribute('data-act');
+    if (act === 'open-src') {
+      // 网址素材的封面图：库里没有原件可放大，点它就是去原文（2026-09-22）。
+      if (it.source_url) window.open(it.source_url, '_blank', 'noopener');
+      else toast('这条没有原文网址');
+      return;
+    }
     if (act === 'cover-use') {
       // 换封面图：先按整图铺上（那一刻还不知道该裁哪儿），用户可以再点「重裁」——
       // 2026-09-20 起重裁对任意一张封面图都可用（原先只在第 1 张时可用，见 rectFor 注释）。
@@ -771,7 +1008,6 @@
       window.open(u2, '_blank', 'noopener');
       return;
     }
-    if (act === 'save-raw') { save({ raw_text: ($('fRaw').value.trim() || null) }, '原文已保存'); return; }
     if (act === 'cover-raw') { reloadThumb(state.item.cover_index || 0, 'raw', 'uncrop'); return; }
     // 重裁的对象是**当前封面那张图**，不再是写死的第 1 张
     if (act === 'cover-crop') { reloadThumb(state.item.cover_index || 0, 'crop', 'recrop'); return; }
@@ -801,15 +1037,41 @@
     }
   });
 
+  // 保存条要会「亮」。按钮从卡片中段挪到常驻位置只解决了一半问题——另一半是
+  // 让人知道**现在有没保存的东西**：这些字段（标题/摘要/链接/备注/文本）不是即改即存，
+  // 改完不点保存就白改，而它们分散在多张卡片里，很容易改完就滚走了（2026-09-22）。
+  // 挂在 document 上而不是 #fields：项目名称与摘要 2026-09-22 搬到了左栏的封面卡片里，
+  // 已经不在 #fields 这个容器内。
+  document.addEventListener('input', function (e) {
+    var id = e.target && e.target.id;
+    if (!id) return;
+    if (['fTitle', 'fSummary', 'fDigest', 'fCaption', 'fOcr', 'fNote', 'fUrl', 'fRaw'].indexOf(id) < 0) return;
+    var bar = $('saveBar');
+    if (bar) bar.classList.add('dirty');
+  });
+
+  // 「保存条」那一次提交。字段分散在「基本信息 / 来源 / 我为什么存它 / 文本」四张卡片里，
+  // 一次全存——所以按钮必须在**常驻位置**（#saveBar），不能埋在中间某张卡片里（2026-09-22）。
+  // 取不到的元素跳过（访客态不渲染这些输入框，不该因此报错）。
+  function fv(id) {
+    var el = $(id);
+    return el ? el.value.trim() : undefined;
+  }
   function saveFields() {
-    var patch = {
-      ai_title: ($('fTitle').value.trim() || ''),
-      ai_summary: ($('fSummary').value.trim() || null),
-      ai_caption: ($('fCaption').value.trim() || null),
-      ocr_text: ($('fOcr').value.trim() || null),
-      my_note: ($('fNote').value.trim() || null),
-      source_url: ($('fUrl').value.trim() || null)
-    };
+    var patch = {};
+    var pairs = [['fTitle', 'ai_title'], ['fSummary', 'ai_summary'],
+      // 三段总结（2026-09-22）。它可改是有意的：digest 是「值不值得点进原文」
+      // 的唯一依据，AI 写偏了这一条就没用了。改不改得动，也正好是判断这套
+      // 总结可不可用的依据（A2 的修改率就是拿它算的，见 diff.js）。
+      ['fDigest', 'ai_digest'],
+      ['fCaption', 'ai_caption'],
+      ['fOcr', 'ocr_text'], ['fRaw', 'raw_text'], ['fNote', 'my_note'], ['fUrl', 'source_url']];
+    pairs.forEach(function (p) {
+      var v = fv(p[0]);
+      if (v === undefined) return;
+      // ai_title 空串要存成空串（「未命名」是合法状态）；其余空串落成 null
+      patch[p[1]] = (p[1] === 'ai_title') ? v : (v || null);
+    });
     save(patch, '已保存');
   }
 

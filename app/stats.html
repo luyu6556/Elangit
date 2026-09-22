@@ -310,7 +310,9 @@
       return;
     }
 
-    var order = ['category', 'platform', 'tags', 'title', 'summary', 'caption', 'ocr_text'];
+    // 字段表的显示顺序（2026-09-22 补 digest）。这张表只列 order 里的字段——
+    // 漏一个，diff 那边算出来了也不会显示，A2 就永远量不到那个字段。
+    var order = ['category', 'platform', 'tags', 'title', 'summary', 'digest', 'caption', 'ocr_text'];
     var rows = order.filter(function (k) { return s.byField[k]; }).map(function (k) {
       var f = s.byField[k];
       // 分母是「AI 真的产出过这个字段」的样本数，不是「有原值的素材数」（P0-2）。
@@ -338,6 +340,16 @@
           + '<b>这些条不进它的分母</b>。';
       }
     });
+    // digest 的「没产出」原因和上面两个不一样（不是没图，是没抓到网页正文，
+    // 或者这条根本不是设计项目），并进上面那句会把原因说错，所以单独说。
+    (function () {
+      var f = s.byField['digest'];
+      if (f && f.empty) {
+        emptyNote += '「' + esc(f.label) + '」有 ' + f.empty + ' 条 AI 没产出——'
+          + '多数是<b>没抓到网页正文</b>，或者<b>这条不是设计项目</b>（如奖项榜单、资讯页），'
+          + '这些条不进它的分母。';
+      }
+    })();
 
     $('diff').innerHTML =
       '<div class="kpis" style="margin-bottom:16px">'

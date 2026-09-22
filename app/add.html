@@ -440,6 +440,10 @@
           // 一部分原因就是模型只拿到一串 URL，而提示词还在催它「判不出就用兜底抽屉」）。
           page_title: (meta && meta.title) || null,
           page_desc: (meta && meta.desc) || null,
+          // 网页正文（2026-09-22）。为什么落库：AI 是入库之后异步跑的，页面
+          // 刷新后 pending 条目会重新排队，那时内存里已经没有抓取结果了——
+          // 不落库就等于「重跑 AI」永远跑不出 digest。理由同上一条。
+          page_text: (meta && meta.text) || null,
           status: 'pending'
         }).then(function (item) {
           var writeMs = Date.now() - tWrite;
@@ -542,6 +546,11 @@
           // 分类判错多半出在这里。这两段是真实文字，比 slug 猜词可靠得多。
           pageTitle: item.page_title || '',
           pageDesc: item.page_desc || '',
+          // 正文（2026-09-22）。说明为什么必须有它：摘要原先只能拿 og:title 与
+          // og:description 去写，而 gooood 的 og:description 是每篇都一样的
+          // 客套模板，于是摘要只能把标题念一遍。digest 那三段（理念/做法/效果）
+          // 更是非有正文不可——只靠标题编出来的三段一定是假的。
+          pageText: item.page_text || '',
           taxonomy: tax
         }).then(function (r) {
           patch.status = 'done';
@@ -549,6 +558,9 @@
           // 用空串表示「AI 判不出」，null 表示「这一列从来没被填过」。
           patch.ai_title = r.title || '';
           patch.ai_summary = r.summary;
+          // 三段总结（理念/做法/效果）。空串表示「没有正文 / 这条不是设计项目」，
+          // 与「从来没被填过」（null）区分开——理由同 ai_title。
+          patch.ai_digest = r.digest || '';
           patch.ai_caption = r.caption;
           patch.ocr_text = r.ocrText;
           patch.ai_tags = r.tags;

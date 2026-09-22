@@ -33,6 +33,11 @@
     // 落库的理由不是「留个记录」，是**重跑 AI 时要能复用**：AI 排在入库之后异步跑，
     // 页面刷新后 pending 的条目会重新排队，那时内存里已经没有抓取结果了。
     'page_title', 'page_desc',
+    // page_text / ai_digest（2026-09-22 新增）：
+    //   page_text  = 抓到的网页**正文**，理由与上一条完全相同（重跑时要复用）。
+    //                 几千字，所以只进 ITEM_COLS，不进索引。
+    //   ai_digest  = 「理念/做法/效果」三段总结，给人读的。进索引是为了搜索命中。
+    'page_text', 'ai_digest',
     // share_token 也带上：详情页要显示「这条分享出去了没有」，
     // 少了它就只能另发一次查询（任务 7）
     'share_token',
@@ -210,6 +215,10 @@
     // 原文标题里往往有 AI 收敛后丢掉的信息（作者、地点）。page_desc 不进：
     // 它更长而信息密度低，检索价值被 ai_summary 覆盖了。
     'page_title',
+    // ai_digest 进索引（2026-09-22）：它是「设计说明总结」，正文里的做法与材料名
+    // 大多落在这里，搜「夯土」「模块化」这类词该命中它。
+    // page_text（正文几千字）**不进**：理由同 page_desc，而且它会把列表页查询撑大。
+    'ai_digest',
     'source_type', 'cover_source', 'cover_index', 'created_at'
   ].join(',');
 
@@ -310,14 +319,14 @@
   // 报表用的素材全量：只取算指标要的列，**不带图片**。
   // ai_raw 必须带上——F2-8 的差异、E4/E11/E12 的派生全靠它。
   //
-  // ⚠️ ai_summary / ai_caption / ocr_text 也必须带上（2026-09-20 修正）：
-  // diff.fields() 拿它们跟 ai_raw 里的原值对比，而这三个字段正是 A2 字段表的三行。
+  // ⚠️ ai_summary / ai_caption / ocr_text / ai_digest 也必须带上（2026-09-20 修正，2026-09-22 补 ai_digest）：
+  // diff.fields() 拿它们跟 ai_raw 里的原值对比，而这几列正是 A2 字段表的行。
   // 少了它们，after 恒为空字符串 —— 于是「只要 AI 出过这段文字就算被改过」，
   // 可用率恒为 0%。不报错、但数字全错，是最难被发现的那种 bug。
-  // 这三列只有数据页要用（列表页走 ITEM_COLS），加在这里不影响别处。
+  // 这几列只有数据页要用（列表页走 ITEM_COLS），加在这里不影响别处。
   var REPORT_COLS = [
     'id', 'category', 'ai_title', 'ai_summary', 'ai_caption', 'ocr_text',
-    'ai_tags', 'my_tags', 'source_platform',
+    'ai_digest', 'ai_tags', 'my_tags', 'source_platform',
     'cover_source', 'cover_index', 'status', 'created_at', 'ai_raw'
   ].join(',');
 

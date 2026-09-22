@@ -26,15 +26,25 @@
       <h3>抽屉</h3>
       <div id="navCats"></div>
     </div>
-    <div class="sec">
-      <h3>标签</h3>
-      <div id="navTags"></div>
-    </div>
-    <!-- 收藏夹分享（F6-1）。放在侧栏而不是顶栏：顶栏已经有 logo、导航、
-         计数和所有者开关，再塞一颗按钮会在 760~1000px 这段挤坏（9.5 踩过）。 -->
-    <div class="sec owner-only">
-      <h3>分享这个收藏夹</h3>
-      <div id="shareBox"><div class="shnone">读取中…</div></div>
+
+    <!-- 「更多筛选」开关（2026-09-22）。手机端默认收起，把首屏让给卡片；
+         桌面端这颗按钮被 CSS 隐藏，下面的 .filt-body 就是个普通 div。
+         分享也放进这里：它是配置项不是筛选，但对手机端的高度的要求相同。 -->
+    <button class="filt-toggle" id="filtToggle" type="button" aria-expanded="false" aria-controls="filtBody">
+      <span>更多筛选</span><span class="ft-c" id="filtCount"></span><span class="ft-a">▾</span>
+    </button>
+
+    <div class="filt-body" id="filtBody">
+      <div class="sec">
+        <h3>标签</h3>
+        <div id="navTags"></div>
+      </div>
+      <!-- 收藏夹分享（F6-1）。放在侧栏而不是顶栏：顶栏已经有 logo、导航、
+           计数和所有者开关，再塞一颗按钮会在 760~1000px 这段挤坏（9.5 踩过）。 -->
+      <div class="sec owner-only">
+        <h3>分享这个收藏夹</h3>
+        <div id="shareBox"><div class="shnone">读取中…</div></div>
+      </div>
     </div>
   </aside>
 
@@ -181,6 +191,9 @@
 
     $('count').textContent = C.countText(page.length, state.filtered.length);
     $('reset').style.display = filtering ? '' : 'none';
+    // 收起「更多筛选」后，标签是看不见的，所以要把「已选几个标签」顶到开关上 ——
+    // 否则用户看着被筛过的结果却找不到原因（清空筛选那颗按钮在列表栏里，手机上也在）。
+    C.setFiltCount(state.tags.length);
     $('hdrNote').textContent = state.index.length
       ? '共 ' + state.index.length + ' 条素材' + (filtering ? '（筛选中）' : '')
       : '还没有素材';
@@ -422,6 +435,7 @@
   // 顶栏的所有者开关必须挂上。少了这一句，访客看到的是一个「没有解锁入口、
   // 也看不到收进灵感」的页面——nav 链接被 .owner-only 藏了，却没有任何地方能解锁。
   window.Elangit.ownerBar.mount();
+  C.wireFilterToggle();      // 窄屏的「更多筛选」开关（桌面端按钮被 CSS 隐藏）
   renderShare();   // 解锁状态变了会再调一次（见 onOwnerChange）
 
   // E9：今天开过没有。每个自然日只记一条，A12「连续两周不中断」就是数它。
