@@ -156,7 +156,14 @@
     }
 
     var tags = (it.ai_tags || []).concat(it.my_tags || []);
-    var shownTags = tags.slice(0, 4);
+    // 卡片上只放 3 个标签。为什么是 3 而不是 4：
+    // 标签是变宽的（实测 5 字 74px / 4 字 62px / 3 字 51px / 2 字 39px，间距 4px），
+    // 而卡片内容宽只有 258px。放 4 个最坏要 249–255px，已经贴死上限——再挂一个
+    // 余数必然折行；折行会让标签块从 22px 变成 47px，同一行卡片的标签顶端因此
+    // 错开 26px（底端对齐、顶端不齐），看起来就是「没对齐」。
+    // 3 个最坏 3×74+8 = 230px，留 28px 给余数，一行永远放得下。
+    // 代价是信息量少一个标签，但详情页有全部标签，权衡划算。
+    var shownTags = tags.slice(0, 3);
     var title = (it.ai_title || '').trim();
     var act = opts.openAct || 'open';
 
@@ -176,7 +183,10 @@
           + (it.ai_summary ? esc(it.ai_summary) : (it.raw_text ? esc(it.raw_text.slice(0, 80)) : '（没有文字内容）'))
         + '</div>'
         + '<div class="ctags">' + shownTags.map(function (t) { return tagChip(tax, t, {}); }).join('')
-          + (tags.length > 4 ? '<span class="chip" style="color:var(--ink-3);background:#F1EFEB">+' + (tags.length - 4) + '</span>' : '')
+          // 余数不再是一枚胶囊。原来是独立 chip，放不下时它会自己掉到第二行、
+          // 孤零零占一整行——那正是用户看到的「+1 占一行」。改成跟随在最后一个
+          // 标签后面的灰色小字，不占独立宽度，也就没有「掉行」这回事。
+          + (tags.length > 3 ? '<span class="cmore">+' + (tags.length - 3) + '</span>' : '')
         + '</div>'
       + '</div>'
       + '<div class="cmrow">'

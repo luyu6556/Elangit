@@ -139,10 +139,21 @@ textarea.inp{resize:vertical;min-height:84px;line-height:1.6}
   padding:7px 12px;border-top:1px solid var(--line);background:#FCFBFA;margin-top:auto;
 }
 .cmrow .sp{flex:1}
-.csum{font-size:13px;line-height:1.5;color:var(--ink);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+/* 摘要有 3 行的空间（不是 2 行），这是算出来的、不是估的：
+   `.cbody` 高 112px、上下内边距 7+10=17px → 内容区 95px，子元素只有
+   `.csum` + gap 9px + `.ctags`。标签统一成一行后 `.ctags` 恒为 22px，
+   于是摘要可用 95-9-22 = 64px，正好放 3 行（3×19.5 = 59px）。
+   改回 2 行时标签一折行只剩 39px，2 行就撑满了——这就是原来 9/16 条
+   摘要被截断的原因。**标签省下来的那 26px 正好换第 3 行回来。** */
+.csum{font-size:13px;line-height:1.5;color:var(--ink);display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
 .csum.empty{color:var(--ink-3)}
-.ctags{display:flex;flex-wrap:wrap;gap:4px;margin-top:auto}
-.ctags .chip{padding:4px 7px;font-size:11.5px}
+.ctags{display:flex;flex-wrap:nowrap;gap:4px;margin-top:auto;overflow:hidden}
+.ctags .chip{padding:4px 7px;font-size:11.5px;flex:none}
+/* 余数：跟随最后一个标签的灰色小字，**不是**一枚胶囊。
+   原来的胶囊会自己掉到第二行、独占一行（用户报的「+1 占一行」）。
+   它排在最后，所以万一将来出现超长标签名放不下，被裁掉的是它——
+   降级顺序正好是最不重要的先消失。 */
+.ctags .cmore{font-size:11px;color:var(--ink-3);flex:none;align-self:center}
 
 /* 整页空态。**类名刻意不叫 `empty`**：`.ro.empty`（只读字段为空）、`.csum.empty`（摘要为空）、
    `.sum.empty`（录入页摘要为空）都带有 `empty` 这个类，若这里用 `.empty`，那些小字块会一起继承

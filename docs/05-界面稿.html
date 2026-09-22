@@ -121,9 +121,10 @@
   .linkbtn{font-size:11.5px;line-height:1;color:var(--ink-2);border:1px solid var(--line-2);border-radius:6px;padding:4px 8px;background:#fff;transition:border-color .12s,color .12s;text-decoration:none;display:inline-block}
   .linkbtn:hover{border-color:var(--ink-3);color:var(--ink)}
   .cbody{padding:11px 12px 12px;display:flex;flex-direction:column;gap:9px;flex:1}
-  .csum{font-size:13px;line-height:1.5;color:var(--ink);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
-  .ctags{display:flex;flex-wrap:wrap;gap:4px;margin-top:auto}
-  .ctags .chip{padding:4px 7px;font-size:11.5px}
+  .csum{font-size:13px;line-height:1.5;color:var(--ink);display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+  .ctags{display:flex;flex-wrap:nowrap;gap:4px;margin-top:auto;overflow:hidden}
+  .ctags .chip{padding:4px 7px;font-size:11.5px;flex:none}
+  .ctags .cmore{font-size:11px;color:var(--ink-3);flex:none;align-self:center}
 
   .empty{text-align:center;padding:80px 20px;color:var(--ink-3)}
   .empty b{display:block;color:var(--ink);font-weight:500;font-size:15px;margin-bottom:6px}
@@ -461,7 +462,7 @@ function render(){
       </div>
       <div class="cbody">
         <div class="csum">${esc(i.sum)}</div>
-        <div class="ctags">${tagRow(i.tags.slice(0,4))}${i.tags.length>4?`<span class="chip" style="color:var(--ink-3);background:#F1EFEB">+${i.tags.length-4}</span>`:''}</div>
+        <div class="ctags">${tagRow(i.tags.slice(0,3))}${i.tags.length>3?`<span class="cmore">+${i.tags.length-3}</span>`:''}</div>
       </div>
     </div>`).join('');
 
