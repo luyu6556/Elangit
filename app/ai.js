@@ -168,48 +168,72 @@
     return s.slice(0, 20);
   }
 
-  // 三段总结（digest）的容错（2026-09-22）。
+  // 三段总结（digest）的**严格校验**（2026-09-22 第二轮改）。
   //
-  // 界面是按行渲染、按「理念/做法/效果」这三个标签加粗的，所以这里必须
-  // 把模型的各种写法收敛成「每段一行、以标签开头」。见过/防着的写法：
-  //   数组 ["…","…","…"]、三段挤成一行用｜或空格隔开、漏标签、多空行。
+  // 上一版对「连标签都没有、只有一整段」的输出是**原样返回**的，理由是「不给模型
+  // 没做过的分类硬贴标签」。理由没错，结论错了：原样返回等于让模型的闲聊/无关回答
+  // 以「设计说明总结」的身份落进 ai_digest，并在详情页与访客分享页渲染出来 ——
+  // **界面说它是设计总结，它不是**。这是本项目最忌讳的一类错（把没有信号读成有信号），
+  // 比空着更糟：空着至少是诚实的。按 PRD F2-12，这里只接受约定格式，其余一律空串。
   //
-  // 特别注意**不要**给「连标签都没有、只有一整段」的结果硬贴一个「理念：」——
-  // 那是在编一个模型没做过的分类。这种情况原样返回，界面上就是一段普通文字。
+  // 契约（改这里要连 PRD F2-12 一起改）：
+  //   1. 「理念 / 做法 / 效果」三项**齐全**、每项都有非空内容，才算合规；
+  //   2. 顺序不要求 —— 标签本身就是对应关系，**乱序时重排**，不丢弃；
+  //   3. 缺任意一项、或一个标签都没有 → 不合规，返回空串；
+  //   4. 不合规时把原文交给调用方（`rejected`），由 analyze 留给 `ai_raw.digestRaw`
+  //      备查 —— 本函数只做纯文本判断，不产生副作用。
+  //
+  // 为什么「重排」可以、「补标签」不可以：三个标签齐全，说明模型确实做过这三项判断，
+  // 只是顺序或换行不合约定，重排不引入任何新信息；缺标签时无法知道缺的那段属于哪一项，
+  // 补上就是替模型编一个它没给过的判断。
+  //
+  // 已知未做的：PRD 说整段 ≤120 字，这里只按 300 字截断（沿上一版），
+  // 不校验 120 —— 实测库里已有一条 150 字（id=15），见构建记录 #027。
   var DIGEST_LABELS = ['理念', '做法', '效果'];
-  function normalizeDigest(v) {
-    if (v == null) return '';
-    var parts;
-    if (Object.prototype.toString.call(v) === '[object Array]') {
-      parts = v.map(function (x) { return String(x == null ? '' : x); });
-    } else {
-      var s = String(v).replace(/\r/g, '').trim();
-      if (!s) return '';
-      // 有换行就按行切；只有一行时才按那三个标签词切
-      parts = s.indexOf('\n') >= 0
-        ? s.split('\n')
-        : s.split(/(?=理念\s*[：:]|做法\s*[：:]|效果\s*[：:])/);
-    }
+  var DIGEST_LINE = /^(理念|做法|效果)\s*[：:]\s*([\s\S]*)$/;
+  // 三段挤成一行时的分隔符，只去首尾（中间的是正文，不能动）
+  var DIGEST_EDGE = /^[\s｜|/、,，;；]+|[\s｜|/、,，;；]+$/g;
+  var DIGEST_MAX = 300;
+  var DIGEST_RAW_MAX = 500;
 
-    var labeled = parts.some(function (p) {
-      return /^\s*(理念|做法|效果)\s*[：:]/.test(p);
-    });
-    var out = [];
+  // 返回 { text, rejected }：text = 合规时的三行文本；rejected = 不合规且模型确实
+  // 给了内容时的原文（供留痕），其余情况为空串。
+  function parseDigest(v) {
+    if (v == null) return { text: '', rejected: '' };
+    var isArr = Object.prototype.toString.call(v) === '[object Array]';
+    var rawAll = (isArr
+      ? v.map(function (x) { return String(x == null ? '' : x); }).join('\n')
+      : String(v)).replace(/\r/g, '').trim();
+    if (!rawAll) return { text: '', rejected: '' };
+
+    // 有换行就按行切；只有一行时才按那三个标签词切（三段挤成一行 / 数组）
+    var parts = rawAll.indexOf('\n') >= 0
+      ? rawAll.split('\n')
+      : rawAll.split(/(?=理念\s*[：:]|做法\s*[：:]|效果\s*[：:])/);
+
+    var hit = {};      // 标签 → 内容：顺序在这一步被抹平，下面按固定顺序拼回
     parts.forEach(function (p) {
       p = String(p).trim().replace(/^[-—•*\s]+/, '').trim();
       if (!p) return;
-      var m = /^(理念|做法|效果)\s*[：:]\s*([\s\S]*)$/.exec(p);
-      if (m) out.push(m[1] + '：' + m[2].trim());
-      else if (labeled && out.length < DIGEST_LABELS.length) {
-        // 只有确认这份结果本来就用标签分过段，才按顺序把漏掉的标签补上
-        out.push(DIGEST_LABELS[out.length] + '：' + p);
-      } else out.push(p);
+      var m = DIGEST_LINE.exec(p);
+      if (!m) return;                                  // 不带标签的行（客套话等）丢掉
+      var body = m[2].trim().replace(DIGEST_EDGE, '').trim();
+      if (!body) return;                               // 有标签但没内容 → 当作没写
+      if (!hit[m[1]]) hit[m[1]] = body;                // 同一标签重复出现时取第一份
     });
-    if (!out.length) return '';
-    // 整段没标签又只有一段：原样返回，不贴标签
-    if (!labeled && out.length === 1) return out[0].slice(0, 300);
-    return out.slice(0, DIGEST_LABELS.length).join('\n').slice(0, 300);
+
+    var missing = DIGEST_LABELS.filter(function (k) { return !hit[k]; });
+    if (missing.length) {
+      return { text: '', rejected: rawAll.slice(0, DIGEST_RAW_MAX) };
+    }
+    return {
+      text: DIGEST_LABELS.map(function (k) { return k + '：' + hit[k]; })
+        .join('\n').slice(0, DIGEST_MAX),
+      rejected: ''
+    };
   }
+
+  function normalizeDigest(v) { return parseDigest(v).text; }
 
   /* ---------- 单次流式调用（analyze 与 detectRect 共用） ---------- */
 
@@ -285,7 +309,7 @@
    *   pageTitle 服务端抓来的网页标题（可能为空）
    *   pageDesc  服务端抓来的网页描述（可能为空）
    *   taxonomy  {categories, tags}
-   * @returns Promise<{title, summary, caption, ocrText, category, categoryCorrected, tags, platform, rect, rawJson, ms, firstChunkMs}>
+   * @returns Promise<{title, summary, digest, digestRaw, caption, ocrText, category, categoryCorrected, tags, platform, rect, rawJson, ms, firstChunkMs}>
    */
   function analyze(opts) {
     var taxonomy = opts.taxonomy;
@@ -300,10 +324,17 @@
     ).then(function (r) {
       var p = extractJson(r.text);
       var cat = normalizeCategory(p.category, taxonomy);
+      var dg = parseDigest(p.digest);
       return {
         title: normalizeTitle(p.title),
         summary: String(p.summary || '').trim().slice(0, 120),
-        digest: normalizeDigest(p.digest),
+        digest: dg.text,
+        // 被严格校验判为不合规、因而丢弃的原文（为空表示没这回事）。
+        // 为什么要留：模型答了、但格式不对时，界面只显示「没有总结」，
+        // 事后查不出到底是「模型没给」还是「给了被我丢了」。
+        // 另注：ai_raw.digest 与 items.ai_digest 写入时同源（都是 dg.text），
+        // 所以丢弃后 diff.js 的 produced 也不计 —— 不会把「系统丢弃」算成「用户改过」。
+        digestRaw: dg.rejected,
         caption: String(p.caption || '').trim(),
         ocrText: String(p.ocr_text || p.ocrText || '').trim(),
         category: cat.name,
@@ -378,6 +409,10 @@
       tags: r.tags || [],
       summary: r.summary || '',
       digest: r.digest || '',
+      // 不合规被丢弃的原文（2026-09-22 第二轮）。它是**诊断信息**，不是 AI 的判断结果：
+      // 详情页拿它把空态归因说准（有正文 + 有它 = 答了但不合规，而不是「判为非设计项目」）。
+      // 不写进 ai_digest，也不进 A2 的分母。
+      digestRaw: r.digestRaw || '',
       caption: r.caption || '',
       ocrText: r.ocrText || '',
       platform: r.platform || null,
@@ -399,6 +434,7 @@
     normalizePlatform: normalizePlatform,
     normalizeTags: normalizeTags,
     normalizeDigest: normalizeDigest,
+    parseDigest: parseDigest,
     normalizeTitle: normalizeTitle
   };
 })(window);
