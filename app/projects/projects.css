@@ -210,6 +210,14 @@
 .d-card:not(.flipped) .dc-front,
 .d-card.flipped .dc-back{pointer-events:auto}
 .dc-back{transform:rotateY(180deg)}
+/* 正面也显式 rotateY(0deg)：iOS Safari 的 3D 合成里，没有 transform 的正面层
+   不参与 backface 裁剪，翻到背面那一下正面的封面图会残留一帧再消失（用户真机
+   报「翻转后残留封面图停留然后消失」）。给它一个 0 度 transform 让它和背面
+   对称地进入 3D 上下文，backface-visibility 才真正生效。 */
+.dc-front{transform:rotateY(0deg)}
+/* 兜底：iOS 上 img 作为 3D 上下文的叶子节点，可能忽略祖先的 backface-visibility，
+   单独给它也标一份，双保险。 */
+.dc-thumb img{backface-visibility:hidden;-webkit-backface-visibility:hidden}
 
 /* 背面：**整张卡都给文字，不保留封面**。三段总结实测 122–156 字，
    若还占 190px 封面区，手机上就只剩 230px 装 8 行字，一定被截断。 */

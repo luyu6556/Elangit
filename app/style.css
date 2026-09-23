@@ -112,7 +112,13 @@ textarea.inp{resize:vertical;min-height:84px;line-height:1.6}
   background:var(--surface);border:1px solid var(--line);border-radius:var(--r);
   overflow:hidden;transition:border-color .15s,transform .15s;display:flex;flex-direction:column;
 }
-.card:hover{border-color:var(--line-2);transform:translateY(-2px)}
+/* 悬停上浮只给「真有悬停能力」的设备（鼠标/触控板）。触摸屏上手指一按下就会
+   触发 :hover，卡片先 translateY(-2px) 抖一下、再才轮到标签横滑 —— 用户真机报
+   「想横滑标签，先卡片抖一下」。用 @media (hover:hover) 把这段位移关在触摸设备之外，
+   桌面鼠标悬停的反馈原样保留。 */
+@media (hover:hover) and (pointer:fine){
+  .card:hover{border-color:var(--line-2);transform:translateY(-2px)}
+}
 .cthumb{aspect-ratio:4/3;background:#EFEDE9;position:relative;overflow:hidden}
 .cthumb img{width:100%;height:100%;object-fit:cover;display:block}
 .cthumb .plat{
@@ -159,9 +165,12 @@ textarea.inp{resize:vertical;min-height:84px;line-height:1.6}
 .ctags{display:flex;flex-wrap:nowrap;gap:4px;margin-top:auto;
   min-height:22px;   /* 空标签行也得占满 22px，否则「无标签」那张卡的顶端会偏低 */
   overflow-x:auto;overflow-y:hidden;scrollbar-width:none;-webkit-overflow-scrolling:touch;
-  /* 标签是独立横向滚动区：明确把横滑交给它，别让父卡的点击层或浏览器边缘
-     手势抢走。纵向页面滚动仍按原样保留。 */
-  touch-action:pan-x;overscroll-behavior-x:contain}
+  /* 标签是独立横向滚动区。**必须是 pan-x pan-y 而不是只有 pan-x**：iOS 上单一
+     pan-x 意味着「只接受纯水平手势」，手指稍带斜度（人手自然弧线几乎必带垂直
+     分量）就会被判成纵向手势、而纵向又被 pan-x 禁止 —— 第一次触摸**完全无效**，
+     用户要摸第二次（更小心地水平滑）才能滚动，实测就是「标签要摸两次才能滑」。
+     pan-x pan-y 让浏览器按手势主轴分流：横滑滚标签、竖滑滚页面，两种都一次成功。 */
+  touch-action:pan-x pan-y;overscroll-behavior-x:contain}
 .ctags::-webkit-scrollbar{display:none}
 .ctags .chip{padding:4px 7px;font-size:11.5px;flex:none}
 /* 「后面还有标签」的唯一提示是右边缘渐隐，而不是再加一个 +N 小字——
@@ -387,10 +396,12 @@ main.list{flex:1;min-width:0;padding:24px 20px 80px 8px}
 
   main.list{padding:8px 12px 80px}
 
-  /* 标签组各占一行、组内横滑：组数多也不至于把侧栏顶到一屏高 */
+  /* 标签组各占一行、组内横滑：组数多也不至于把侧栏顶到一屏高。
+     touch-action 必须是 pan-x pan-y（理由同 .ctags：单一 pan-x 在 iOS 上会把
+     带斜度的手势整体判无效，表现为「标签要摸两次才能滑」）。 */
   .taggroup .chips{flex-wrap:nowrap;overflow-x:auto;padding-bottom:4px;
     scrollbar-width:none;-webkit-overflow-scrolling:touch;
-    touch-action:pan-x;overscroll-behavior-x:contain}
+    touch-action:pan-x pan-y;overscroll-behavior-x:contain}
   .taggroup .chips::-webkit-scrollbar{display:none}
 }
 

@@ -654,6 +654,22 @@
   // ① 吞掉随后那个 click（原来写死的 5）；② 复位翻面 —— 翻面只存在于静止态，
   // 一旦开始拖就回到正面，所以「复位」必然发生在任何一次翻页之前（P2-11）。
   var MOVED_PX = 5;
+  // 惯性滑行的物理参数（2026-09-23：一次滑动连续翻动）。
+  //   INERTIA_MIN   —— 松手/停滚时速度低于这个值（px/ms）就不进入惯性，直接按
+  //                    「按格数兑现 / 回弹」收尾。0.3 px/ms = 300px/s：再低的话
+  //                    中速滑动也带惯性尾巴，真机感受是「刹不住」；300px/s 起
+  //                    才是明确的「甩」。
+  //   INERTIA_FRICT —— 每毫秒的速度衰减系数，接近 1 就滑得远、接近 0 就立刻停。
+  //                    0.997 ≈ 每秒衰减到 0.997^1000 ≈ 5%，一次快甩约滑 2~4 格后停。
+  //   INERTIA_STOP  —— 速度降到这个值（px/ms）以下就结束滑行，snap 回整格。
+  var INERTIA_MIN = 0.3;
+  var INERTIA_FRICT = 0.997;
+  var INERTIA_STOP = 0.05;
+  // 初速度上限（px/ms）。速度采样是「位移÷帧间隔」，帧间隔很短时会算出一个
+  // 离谱的瞬时速度（触控板一条大 deltaX、dt 只有十几毫秒），不封顶的话一次
+  // 手势能滑飞十几张。2.0 px/ms ≈ 2 屏/秒的甩动，已经到「快甩」的极限，再快
+  // 也按这个算，保证滑行距离有上界。
+  var INERTIA_VMAX = 2.0;
   // 设计说明总结的标签行。与 ai.js 的 DIGEST_LABELS、item.html 的 DIGEST_LINE
   // 是同一条约定（「理念/做法/效果」三项）；这里再写一份是因为 deck 页不加载
   // item.html 的内联脚本。容错规则同 item.html：认得出标签就加粗，
@@ -683,6 +699,11 @@
       queue: [], index: 0, dragX: 0, dragging: false, vel: 0,
       nodes: [], thumbs: {}, asked: {}, collected: {}, order: [], inflight: {}, movedAt: 0,
       index0: {}, index0count: 0,
+      // 惯性滚动状态（2026-09-23：用户要「一次滑动连续翻动、松手惯性滑、按住即停」）。
+      // inertia: { raf, v, t } —— v 是 px/ms 的横向速度，t 是上一帧时间戳。
+      // 与拖拽的 d.vel 分开：拖拽里的 vel 是「这一下甩得多快」的瞬时样本，惯性是
+      // 松手后由它启动的一段自主滑行。
+      inertia: null,
       geom: { cw: 336, step: 82, shrink: .055, fade: .15 }
     };
     deck = d;
@@ -999,8 +1020,13 @@
 
     // 跳到队列里的任意一张。三个入口共用它：拖拽松手、右下角上一张/下一张按钮、
     // 点旁侧卡。「先复位再翻页」（P2-11）的复位就写在这里 —— 唯一出入口，绕不过去。
+    // 超界的目标 **clamp 到边界**而不是放弃：手机上拖了 2 格但队列只剩 1 张时，
+    // 旧版直接 rebind（一张不翻、卡弹回原地），用户的感受是「拖了却没反应」。
+    // 按钮/侧卡两个入口传进来的本来就是有效值，clamp 对它们没有影响。
     function goTo(ni) {
-      if (ni === d.index || ni < 0 || ni >= d.queue.length) { rebind(); return; }
+      if (ni < 0) ni = 0;
+      if (ni > d.queue.length - 1) ni = d.queue.length - 1;
+      if (ni === d.index) { rebind(); return; }
       var ce = centerEl();
       if (isFlipped(ce)) setFlipped(ce, false, true);
       d.index = ni;
@@ -1014,6 +1040,59 @@
       d.dragging = false;
       cardsBox.classList.remove('dragging');
       layout(); paint();
+    }
+
+    /* ---------- 惯性滑行（2026-09-23：一次滑动连续翻动） ---------- */
+    // 松手 / 停滚时，若还有横向速度，就启动一段自主滑行：每帧按摩擦衰减速度、
+    // 累积位移、走满一格就翻一张，速度降到阈值以下再 snap 回整格。手指/鼠标
+    // 按下（onDown）或滚轮再次介入（wheel）都会立刻打断它，做到「按住即停」。
+    function stopInertia() {
+      if (!d.inertia) return;
+      var raf = d.inertia.raf;
+      if (raf) global.cancelAnimationFrame(raf);
+      d.inertia = null;
+    }
+    function startInertia(v) {
+      // v 单位 px/ms。方向由符号定；进入循环前先确保牌堆停在「整格余量」的
+      // 起点上（dragX 已经是相对当前 index 的余量，见 onUp / wheelEnd 的调用点）。
+      stopInertia();
+      var s = v < 0 ? -1 : 1;
+      var a = Math.abs(v);
+      if (a > INERTIA_VMAX) a = INERTIA_VMAX;
+      d.inertia = { v: a, s: s, t: 0, raf: 0 };
+      var step = d.geom.step;
+      function frame(ts) {
+        var it = d.inertia;
+        if (!it) return;                     // 已被打断
+        var dt = it.t ? (ts - it.t) : 16;    // 首帧按 16ms 估算，避免 dt=0 算不出位移
+        it.t = ts;
+        it.v *= Math.pow(INERTIA_FRICT, dt); // 指数衰减，帧率无关
+        if (it.v < INERTIA_STOP) { finishInertia(); return; }
+        var dx = it.s * it.v * dt;
+        d.dragX += dx;
+        var pages = Math.trunc(d.dragX / step);
+        if (pages !== 0) {
+          var ni = d.index - pages;         // dragX<0（向左滑）→ pages<0 → index 变大
+          if (ni < 0) ni = 0;
+          if (ni > d.queue.length - 1) ni = d.queue.length - 1;
+          if (ni !== d.index) {
+            d.dragX -= (d.index - ni) * step;  // 只消费真正翻过去的格数
+            d.index = ni;
+            syncNodes(); paint(); ensureThumbs();
+          } else {
+            d.dragX = 0;                       // 到头了，余量清零
+          }
+        }
+        cardsBox.classList.add('dragging');    // 滑行中关过渡，位移才连续
+        layout();
+        it.raf = global.requestAnimationFrame(frame);
+      }
+      function finishInertia() {
+        d.inertia = null;
+        // 不足一格的余量回弹到整格（与拖拽 / 滚轮的收尾同一个 rebind）。
+        rebind();
+      }
+      d.inertia.raf = global.requestAnimationFrame(frame);
     }
 
     /* ---------- 跟手拖拽 ---------- */
@@ -1035,12 +1114,18 @@
       if (d.queue.length < 2) return;
       if (e.target.closest && e.target.closest('.dc-heart')) return;   // 爱心自己处理
       pid = e.pointerId;
-      // 手指／鼠标按下时把挂着的滚轮手势收掉：否则松手后 130ms，那个定时器
-      // 会拿着「上一次滚轮的位移」再 commit 一次，变成一次莫名其妙的翻页。
+      // 手指/鼠标按下时打断惯性滑行（「按住即停」），并清掉挂着的滚轮手势：否则松手后
+      // 130ms，那个定时器会拿着「上一次滚轮的位移」再 commit 一次，变成一次莫名其妙的翻页。
+      stopInertia();
       if (wheelTimer) { clearTimeout(wheelTimer); wheelTimer = null; }
       wAcc = 0;
       d.dragging = true; d.dragX = 0; d.vel = 0;
       startX = lastX = e.clientX; lastT = Date.now();
+      // 松手速度用「最近 120ms 的位移 ÷ 时间」算，不用最后一个采样点：
+      // 真机上（尤其 iOS）手指松开前会自然减速，最后 8ms 窗口的瞬时速度远低于
+      // 滑动主体的速度，惯性因此时强时弱。维护一个滚动样本窗口，松手时取窗口
+      // 两端的平均，把「松手前的减速」平均掉。
+      d.samples = [{ t: lastT, x: e.clientX }];
       cardsBox.classList.add('dragging');
       e.preventDefault();
     }
@@ -1051,6 +1136,9 @@
       // 速度样本只在 dt ≥ 8ms 时更新。理由：dt 很小时（合成事件里甚至是 0）
       // 会算出一个巨大的瞬时速度，把「手指轻轻一碰」判成甩动。
       if (dt >= 8) { d.vel = (e.clientX - lastX) / dt; lastX = e.clientX; lastT = now; }
+      // 120ms 滚动窗口：每次 move 都推样本，扔掉太老的。松手时用窗口两端算平均速度。
+      d.samples.push({ t: now, x: e.clientX });
+      while (d.samples.length > 2 && now - d.samples[0].t > 120) d.samples.shift();
       // 位移不再硬截。原来截在 step×1.15 —— 手机档（step 44）就只有 52.9px，手指
       // 横移 5 毫米左右卡片就顶住不动了，用户真机实测的评价是「手感很钝」。
       // 现在改成：一格之内 1:1 跟手，超出后渐进减速并自然趋近三格距离。
@@ -1067,25 +1155,48 @@
       }
       layout();
     }
+    // 松手速度：优先用 120ms 窗口的平均（抗「松手前减速」），窗口太短退回瞬时值。
+    function flickVel() {
+      var s = d.samples || [];
+      if (s.length < 2) return d.vel || 0;
+      var a = s[0], b = s[s.length - 1];
+      var dt = b.t - a.t;
+      if (dt < 16) return d.vel || 0;
+      return (b.x - a.x) / dt;
+    }
     function onUp(e) {
       if (!d.dragging || e.pointerId !== pid) return;
       d.dragging = false; pid = null;
       var dx = d.dragX;
       var dist = Math.abs(dx);
+      var velNow = flickVel();
+      // 手指真实走过的格数（用原始位移，不用 rubber 后的 dragX）：拖 2 格就该翻
+      // 2 张。旧版松手只 commit 1 格，拖过的多余格数凭空消失——录屏实测就是
+      // 「卡已经拖到下一张中央、松手却只翻一张弹回去」，这是「真机不对」的主因。
+      var raw = Math.abs(e.clientX - startX);
+      var pages = Math.max(1, Math.trunc(raw / d.geom.step));
       cardsBox.classList.remove('dragging');
       // 阈值：位移过了一格的 30%，或「甩」得够快。
       // 速度那一档额外要求 MIN_FLICK 的最小位移——没有它的话，手抖几个像素
       // 也会被当成甩动而翻页（速度是位移÷时间，位移小并不妨碍它很大）。
       // 两档都只用一个符号决定方向，左右完全对称，所以回弹感天然一致（P2-2b）。
       var far = dist >= d.geom.step * .3;
-      var fast = dist >= MIN_FLICK && Math.abs(d.vel) >= .38;
+      var fast = dist >= MIN_FLICK && Math.abs(velNow) >= .38;
       var dir = 0;
       if (far || fast) {
         if (dx !== 0) dir = dx < 0 ? 1 : -1;
-        else dir = d.vel < 0 ? 1 : -1;
+        else dir = velNow < 0 ? 1 : -1;
       }
       if (dist > MOVED_PX) d.movedAt = Date.now();     // 这一下手要吞掉随后的 click
-      if (dir) commit(dir); else rebind();
+      // 惯性：甩得够快（且方向明确）时，先按「拖过的格数」兑现，再从松手速度
+      // 继续滑；否则维持原来的「翻格 / 回弹」收尾。惯性只认「有速度的甩动」，
+      // 位移够大但手指是慢慢拖过去的（无速度）仍走老路径，不凭空多滑。
+      if (dist >= MIN_FLICK && Math.abs(velNow) >= INERTIA_MIN) {
+        if (dir) goTo(d.index + dir * pages);
+        startInertia(velNow);
+        return;
+      }
+      if (dir) goTo(d.index + dir * pages); else rebind();
     }
     function onCancel(e) {
       if (!d.dragging || e.pointerId !== pid) return;
@@ -1119,28 +1230,42 @@
     var WHEEL_SCALE = 1;    // deltaX → 位移。1:1 才叫跟手（第一版 0.55 是「打折跟手」）。
                             // 想让一次手势翻得慢些就调小这个数（0.5 ≈ 手指走两格才翻一张）。
     var WHEEL_IDLE = 130;   // 多久没有新的 wheel 就当作手势结束（ms）
-    var wAcc = 0, wheelTimer = null;
+    var wAcc = 0, wheelTimer = null, wVel = 0, wLastX = 0, wLastT = 0;
     var stage = $('stage');
 
     function wheelEnd() {
       wheelTimer = null;
       cardsBox.classList.remove('dragging');
       wAcc = 0;
+      // 停滚时若还有横向速度，接一段惯性滑行（触控板松手的那一下惯性）。速度采样
+      // 在 wheel 处理里累积，这里判「够不够快、方向是否横向」，够就交给 startInertia。
+      if (Math.abs(wVel) >= INERTIA_MIN) {
+        var wv = wVel;
+        wVel = 0;
+        startInertia(wv);
+        return;
+      }
+      wVel = 0;
       rebind();             // 不足一格的余量回弹到整格（翻页已经在滚的过程中发生了）
     }
 
     stage.addEventListener('wheel', function (e) {
       if (d.queue.length < 2) return;
       if (d.dragging) return;                       // 真手指在拖时不抢
+      stopInertia();                                 // 滚轮再次介入 = 打断滑行（按住即停的桌面等价）
       var dx = e.deltaX, dy = e.deltaY;
       // deltaMode：0=像素（触控板）／1=行（部分鼠标）／2=页。统一折成像素。
       if (e.deltaMode === 1) { dx *= 16; dy *= 16; }
       else if (e.deltaMode === 2) { dx *= 400; dy *= 400; }
       // 竖着滚就交给页面（背面那段长总结也要能滚）。判据是比较，不是固定阈值。
-      if (Math.abs(dx) <= Math.abs(dy)) return;
+      if (Math.abs(dx) <= Math.abs(dy)) { wVel = 0; return; }
       e.preventDefault();                            // 顺手挡掉 Chrome 双指前进/后退
 
       var step = d.geom.step;
+      // 滚轮速度采样：px/ms。dt 很小时会算出巨大瞬时速度，所以只在 dt ≥ 8ms 时更新
+      // （与拖拽 onMove 同一套防抖理由）。
+      var wnow = Date.now();
+      if (wnow - wLastT >= 8) { wVel = (dx * WHEEL_SCALE) / (wnow - wLastT); wLastT = wnow; }
       wAcc += dx * WHEEL_SCALE;
       // 走满几格就翻几张。dx<0（向左滑）→ pages<0 → index 变大 → 看后面的素材。
       var pages = Math.trunc(wAcc / step);
