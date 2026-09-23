@@ -1,0 +1,347 @@
+/* ============================================================
+ * Elangit · 项目灵感筛选（一期）专属样式
+ * ------------------------------------------------------------
+ * 这个文件必须画在 style.css **之后**：共用令牌（--bg / --surface / --line /
+ * --ink / --r）、顶栏、按钮（.btn / .linkbtn）、面板（.panel）、表单（.inp）、
+ * 标签（.chip）、卡片（.card）与 toast 一律沿用现有构件。
+ * PRD 5.2 明确要求「不能为新功能另造一套视觉语言」，所以这里只写
+ * 现有构件没有的东西：项目列表行、标签选择器、项目素材集、快速翻阅牌堆。
+ *
+ * 牌堆的几何参数（宽/位移/缩放/透明度）放在 CSS 自定义属性里，由
+ * projects.js 用 getComputedStyle 读回来算 transform。放 CSS 而不是 JS 常量，
+ * 是因为「屏幕多窄、露出几层、每层缩多少」是版式问题，应该和媒体查询在一起；
+ * 散成两份（CSS 管宽度、JS 管位移）一定会漂移。
+ * ============================================================ */
+
+/* 爱心按下之后的红色。取自现有色板里最接近「红心」的那一档（--g5 偏玫瑰），
+   单独给一个变量是因为它只服务这一处：将来想调深浅不用在卡片规则里翻。 */
+:root{ --deck-heart:#D8365B; }
+
+/* ---------- 共用小件 ---------- */
+
+.proj-wrap{max-width:1100px;margin:0 auto;padding:24px 20px 90px}
+.proj-crumb{font-size:12.5px;color:var(--ink-3);display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:14px}
+.proj-crumb a{color:var(--ink-2);text-decoration:underline;text-underline-offset:3px}
+.proj-head{display:flex;align-items:flex-end;gap:14px;flex-wrap:wrap;margin-bottom:18px}
+.proj-head h1{font-size:20px;font-weight:500;line-height:1.35;min-width:0;word-break:break-word}
+.proj-head .sp{flex:1}
+.proj-head .acts{display:flex;gap:8px;flex-wrap:wrap}
+
+.proj-status{font-size:11.5px;padding:3px 9px;border-radius:20px;border:1px solid var(--line-2);color:var(--ink-2);white-space:nowrap}
+.proj-status.archived{color:var(--warn);background:var(--warnb);border-color:#E4CFA8}
+
+.proj-brief{font-size:13.5px;line-height:1.7;color:var(--ink-2);white-space:pre-wrap;word-break:break-word}
+.proj-brief.empty{color:var(--ink-3);font-size:12.5px}
+
+/* 归档项目在列表里压暗，但仍可点开——「仍显示并标注」是 P1-5 的要求，
+   压暗只是让它一眼可辨，不是把它藏起来。 */
+.proj-row.is-archived .pname{color:var(--ink-2)}
+.proj-row.is-archived .pmeta{opacity:.75}
+
+/* ---------- 项目列表 ---------- */
+
+.proj-list{display:flex;flex-direction:column;gap:10px}
+.proj-row{
+  background:var(--surface);border:1px solid var(--line);border-radius:var(--r);
+  padding:14px 16px;display:flex;align-items:flex-start;gap:16px;flex-wrap:wrap;
+  transition:border-color .15s;
+}
+.proj-row:hover{border-color:var(--line-2)}
+.proj-row .pmain{flex:1;min-width:220px}
+.proj-row .pname{font-size:15px;font-weight:500;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.proj-row .pname a{color:inherit}
+.proj-row .pname a:hover{text-decoration:underline;text-underline-offset:3px}
+.proj-row .pmeta{font-size:12px;color:var(--ink-3);margin-top:6px;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.proj-row .pmeta .cnum{font-variant-numeric:tabular-nums}
+.proj-row .pbrief{font-size:12.5px;color:var(--ink-2);margin-top:7px;line-height:1.6;
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.proj-row .ptags{margin-top:9px}
+.proj-row .pacts{display:flex;gap:7px;flex-wrap:wrap;align-items:center;flex:none}
+
+/* 二次确认就地展开（P1-5）。不用 window.confirm：它会阻塞页面、
+   也没法在验证台里断言；就地展开能把「删掉什么、留下什么」写清楚。 */
+.pconfirm{margin-top:12px;border-top:1px solid var(--line);padding-top:12px;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.pconfirm .warn{font-size:12.5px;color:var(--err);flex:1;min-width:200px;line-height:1.6}
+.btn.del{background:var(--err)}
+.btn.del:hover{opacity:.9}
+
+/* ---------- 新建／编辑项目 ---------- */
+
+.pform{display:none}
+.pform.on{display:block}
+.pform .pickline{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:6px}
+.pickwrap{display:flex;flex-wrap:wrap;gap:5px;margin-top:8px}
+.pickwrap .chip{cursor:pointer;border:1px solid var(--line-2)}
+/* 选中的标签用实色边框标出。tagChip 自带颜色（同组同色），这里只加一层
+   选中描边，不改它的配色——颜色表示「归属哪个组」，不是「选没选中」。 */
+.pickwrap .chip.on{outline:1.5px solid var(--ink);outline-offset:-1.5px}
+.picknone{font-size:12px;color:var(--ink-3)}
+
+/* ---------- 项目工作台 ---------- */
+
+.ws-head{display:flex;gap:12px;flex-wrap:wrap;align-items:center;margin-bottom:14px}
+.ws-count{font-size:12.5px;color:var(--ink-3)}
+.ws-count b{font-size:15px;color:var(--ink);font-weight:500;font-variant-numeric:tabular-nums}
+
+/* 项目素材集栅格：与首页卡片流同一套列宽规则（style.css 的 .grid 是
+   minmax(228px,1fr)，这里沿用，避免「两个地方同一批卡片、列数不一样」）。
+   多留一点行距，因为每张卡下面还挂着拖拽条。 */
+.wgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(228px,1fr));gap:18px}
+.witem{position:relative;display:flex;flex-direction:column}
+.witem .card{flex:1}
+/* 拖拽中的卡：半透明，并且**关掉自己的指针命中**。后一条是必需的：
+   排序靠 elementFromPoint 找落点，被拖的卡若还挡在指针底下，就永远
+   命中的是它自己，落点算不出来。 */
+.witem.dragging{opacity:.5}
+.witem.dragging, .witem.dragging .whandle{pointer-events:none}
+/* 拖拽把手。为什么用专门把手而不是「整张卡都能拖」：整卡拖必然要和
+   「点卡片进详情」抢同一个手势，而工作台的卡片流在窄屏是要上下滚的——
+   一旦指针手势被拿来做排序，滚动就会变得不可靠。把手只占一小块，
+   touch-action:none 也只作用在它身上，滚动与点击都不受影响。 */
+.whandle{
+  font-size:11.5px;line-height:1;color:var(--ink-2);border:1px solid var(--line-2);
+  border-radius:6px;padding:5px 8px;background:#fff;cursor:grab;user-select:none;
+  touch-action:none;white-space:nowrap;display:inline-block;
+}
+.whandle:hover{border-color:var(--ink-3);color:var(--ink)}
+.whandle:active{cursor:grabbing}
+.whint{font-size:11.5px;color:var(--ink-3);margin-bottom:12px;line-height:1.6}
+
+/* ---------- 快速翻阅：牌堆 ---------- */
+
+.deck-page{display:flex;align-items:stretch;max-width:1440px;margin:0 auto;min-height:calc(100vh - 58px)}
+/* 两侧栏刻意比浏览页侧栏（224px）更窄：PRD 4.1 要求「两侧只保留窄信息栏，
+   不能抢走主卡空间」，而主卡与左右各三层预览牌堆加起来要 918px。 */
+.dkside{
+  width:196px;flex:none;padding:22px 10px 40px 20px;
+  display:flex;flex-direction:column;gap:22px;
+}
+.dkside-r{padding:22px 20px 40px 10px}
+.dkside .dsec h3{font-size:11px;font-weight:500;color:var(--ink-3);letter-spacing:.08em;margin:0 0 8px}
+.dkside .dname{font-size:15px;font-weight:500;line-height:1.4;word-break:break-word}
+.dkside .dbrief{font-size:12.5px;color:var(--ink-2);line-height:1.65;margin-top:8px;white-space:pre-wrap;word-break:break-word}
+.dkside .dbrief.empty{color:var(--ink-3)}
+.dkside .dlinks{display:flex;flex-direction:column;gap:7px;align-items:flex-start}
+.dkside .dstat{font-size:12.5px;color:var(--ink-3);line-height:1.7}
+.dkside .dstat b{font-size:19px;color:var(--ink);font-weight:500;font-variant-numeric:tabular-nums;margin-right:2px}
+.dkside .dlist{font-size:12px;color:var(--ink-2);line-height:1.6;max-height:46vh;overflow-y:auto;margin-top:2px}
+.dkside .dlist button{display:block;width:100%;text-align:left;padding:5px 7px;border-radius:6px;font-size:12px;
+  color:var(--ink-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dkside .dlist button:hover{background:#EFEDE9}
+
+/* 牌堆舞台。--deck-* 是**版式参数**：由这里的媒体查询决定，由 JS 读回算 transform。 */
+.deck-stage{
+  flex:1;min-width:0;display:flex;flex-direction:column;align-items:center;
+  padding:20px 16px 28px;
+  --deck-cw:336px;      /* 主卡宽（缩放前） */
+  --deck-ch:432px;      /* 主卡高：固定值，九张卡同高牌堆才齐 */
+  --deck-th:194px;      /* 封面区高 */
+  --deck-step:82px;     /* 相邻两层的水平位移 */
+  --deck-shrink:.055;   /* 每远一层缩放递减 */
+  --deck-fade:.15;      /* 每远一层透明度递减 */
+}
+/* 手机端紧凑入口（项目名 + 已收藏数）。桌面端隐藏——那时信息在两栏杆里。 */
+.dkmob{display:none;width:100%;align-items:center;gap:10px;margin-bottom:14px}
+.dkmob .mname{font-size:13.5px;font-weight:500;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dkmob .mname a{color:inherit}
+.dkmob .mtag{font-size:12px;color:var(--ink-3);white-space:nowrap;font-variant-numeric:tabular-nums}
+
+.deckbox{position:relative;width:100%;display:flex;align-items:center;justify-content:center;flex:1;min-height:0;overflow:hidden}
+/* 定位容器：宽度=主卡宽（居中），卡片绝对定位并以 left:50% + -50% 平移把自己
+   摆到容器中心。裁切交给外面的 .deckbox：相邻三层会大幅溢出这个容器，
+   在这里裁就等于把牌堆两侧切掉。 */
+.deckcards{position:relative;width:var(--deck-cw);height:var(--deck-ch);flex:none}
+/* touch-action:pan-y —— 纵向留给浏览器（页面还能滚），横向留给牌堆。
+   若写成 none，翻阅页在窄屏就完全滚不动；若写成 auto，横滑会被浏览器
+   当历史返回手势吃掉（iOS Safari 边界横滑触发前进后退），牌堆就废了。 */
+.deckcards{touch-action:pan-y}
+
+.d-card{
+  position:absolute;left:50%;top:0;width:var(--deck-cw);height:var(--deck-ch);
+  border-radius:var(--r);
+  will-change:transform,opacity;
+  transform-origin:50% 50%;
+  /* 翻转的 3D 舞台。rotateY 挂在内层的 .dc-flip 上，**不能直接写在 .d-card**：
+     这个元素的 transform 已经被 layout() 每帧重写成 translateX+scale 了，
+     两处都写会互相覆盖（翻转永远不生效、或者把牌堆位移吃掉）。 */
+  perspective:1400px;
+  /* 这里**刻意不加 overflow:hidden**：overflow 非 visible 会把子元素的
+     preserve-3d 压平，3D 翻转直接失效。圆角裁切改由 .dc-front/.dc-back
+     各自负责——它们不需要 preserve-3d，可以安全地 overflow:hidden。 */
+  /* 松手后的「回弹 / 补完一格」就走这条过渡。拖拽期间由 .dragging 关掉，
+     否则跟手会有延迟感。 */
+  transition:transform .34s cubic-bezier(.22,.61,.36,1),opacity .34s ease;
+}
+.deckcards.dragging .d-card{transition:none}
+/* 回收节点时必须瞬移：它从牌堆一端绕到另一端，若走过渡会「飞过去」。
+   因为它在那两端的透明度是 0，理论上看不见，但宁可显式关掉。
+   翻转过渡要一起关：被回收的节点可能停在背面，不关就会看到它边飞边翻。 */
+.d-card.noanim{transition:none !important}
+.d-card.noanim .dc-flip{transition:none !important}
+/* 首次装配期间禁用过渡（.booting 由 projects.js 在装配前加上、**首帧同步摘掉**——
+   摘类不能等到下一帧，那样只减半偏移、消不掉这一滑，原因见 projects.js 里的注释）。 */
+.deckcards.booting .d-card{transition:none !important}
+.deckcards.booting .dc-flip{transition:none !important}
+
+/* ---------- 卡片的两个面（P2-4 改，2026-09-23） ----------
+   正面＝认人（封面＋标题＋摘要＋标签＋收藏），背面＝阅读（三段设计说明总结＋进详情）。
+   两面都绝对定位、各自裁圆角，靠 backface-visibility 决定谁可见。 */
+.dc-flip{
+  position:absolute;inset:0;
+  transform-style:preserve-3d;
+  transition:transform .46s cubic-bezier(.3,.7,.35,1);
+}
+.d-card.flipped .dc-flip{transform:rotateY(180deg)}
+/* 「先复位再翻页」的复位必须是瞬时的（见 projects.js 的 dragStarted）：
+   拖动中若还播 .46s 的翻转，会变成「一边横移一边慢慢转回来」，像卡在两层之间。 */
+.dc-flip.noanim{transition:none !important}
+.dc-face{
+  position:absolute;inset:0;
+  backface-visibility:hidden;-webkit-backface-visibility:hidden;
+  border:1px solid var(--line);border-radius:var(--r);background:var(--surface);
+  overflow:hidden;display:flex;flex-direction:column;
+}
+/* **不可见的那一面必须不接收指针事件。** backface-visibility 只管「画不画」，
+   *不*管命中测试：实测翻到背面后 elementFromPoint 返回的仍是正面里的元素
+   （点背面右下角的「详情」会从正面解析出 .d-card，于是变成「切换翻面」，
+   按钮完全点不动）。所以隐藏面显式关掉指针，只留当前可见的那一面。
+   两个面都是 inset:0 叠在一起，不关就必然互相抢。 */
+.dc-front,.dc-back{pointer-events:none}
+.d-card:not(.flipped) .dc-front,
+.d-card.flipped .dc-back{pointer-events:auto}
+.dc-back{transform:rotateY(180deg)}
+
+/* 背面：**整张卡都给文字，不保留封面**。三段总结实测 122–156 字，
+   若还占 190px 封面区，手机上就只剩 230px 装 8 行字，一定被截断。 */
+.dc-bhead{padding:15px 16px 0;flex:none}
+.dc-btitle{font-size:15px;font-weight:500;line-height:1.45;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dc-btitle.noname{color:var(--ink-3);font-weight:400}
+.dc-bkick{font-size:11px;color:var(--ink-3);margin-top:5px;letter-spacing:.03em}
+.dc-dg{flex:1;min-height:0;overflow-y:auto;padding:11px 16px 6px;
+  display:flex;flex-direction:column;gap:8px}
+.dc-dgrow{font-size:12.5px;line-height:1.62;color:var(--ink)}
+.dc-dgrow b{display:inline-block;color:var(--ink-2);font-weight:500;
+  background:#F4F2EE;border-radius:4px;padding:1px 6px;margin-right:6px;font-size:11.5px}
+.dc-dgempty{font-size:12.5px;line-height:1.75;color:var(--ink-3)}
+.dc-dgempty b{display:block;color:var(--ink-2);font-weight:500;margin-bottom:5px}
+/* 背面的页脚与正面同构（分类+日期在左），右下角换成「详情」——
+   与正面的爱心同一个位置，视觉锚点不跳。 */
+.dc-bfoot{display:flex;align-items:center;gap:10px;flex:none;
+  padding:8px 10px 8px 16px;border-top:1px solid var(--line);background:#FCFBFA}
+.dc-detail{
+  flex:none;display:inline-flex;align-items:center;gap:4px;height:34px;padding:0 11px;
+  border:1px solid var(--line-2);border-radius:8px;background:#fff;color:var(--ink);
+  font-size:12.5px;transition:border-color .15s,background .15s;
+}
+.dc-detail:hover{border-color:var(--ink-3);background:#FCFBFA}
+.dc-detail svg{width:13px;height:13px;flex:none}
+
+.dc-thumb{height:var(--deck-th);flex:none;background:#EFEDE9;position:relative;overflow:hidden}
+.dc-thumb img{width:100%;height:100%;object-fit:cover;display:block;pointer-events:none}
+.dc-thumb .plat{
+  position:absolute;left:8px;top:8px;font-size:11px;line-height:1;
+  padding:4px 7px;border-radius:5px;background:rgba(255,255,255,.92);color:var(--ink-2);
+}
+.dc-thumb .stag{position:absolute;right:8px;top:8px}
+.dc-nocover{height:100%;display:flex;align-items:center;justify-content:center;background:#F1EFEB}
+.dc-nocover p{font-size:12px;color:var(--ink-3);padding:0 22px;text-align:center;line-height:1.7}
+
+.dc-body{padding:14px 16px 12px;display:flex;flex-direction:column;gap:9px;flex:1;min-height:0}
+.dc-title{font-size:15px;font-weight:500;line-height:1.45;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:none}
+.dc-title.noname{color:var(--ink-3);font-weight:400}
+.dc-sum{font-size:13px;line-height:1.55;color:var(--ink);display:-webkit-box;-webkit-line-clamp:3;
+  -webkit-box-orient:vertical;overflow:hidden}
+.dc-tags{display:flex;flex-wrap:nowrap;gap:4px;overflow-x:auto;overflow-y:hidden;scrollbar-width:none;
+  margin-top:auto;min-height:22px}
+.dc-tags::-webkit-scrollbar{display:none}
+.dc-tags .chip{padding:4px 7px;font-size:11.5px;flex:none}
+
+/* 主卡的唯一显式操作是右下角爱心（P2-2c）。放在 footer 行里而不是绝对定位：
+   绝对定位要靠负边距去「不遮挡左下角」，而负边距一旦碰上更长的分类名
+   （「城市与公共空间」）就会压字；flex 布局是从结构上保证两者不重叠。 */
+.dc-foot{
+  display:flex;align-items:center;gap:10px;flex:none;
+  padding:8px 10px 8px 16px;border-top:1px solid var(--line);background:#FCFBFA;
+}
+.dc-meta{flex:1;min-width:0;font-size:12px;color:var(--ink-2);display:flex;align-items:baseline;gap:8px}
+.dc-meta span:first-child{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dc-meta .dc-date{font-size:11.5px;color:var(--ink-3);flex:none;font-variant-numeric:tabular-nums}
+.dc-heart{
+  width:42px;height:42px;flex:none;border-radius:50%;display:flex;align-items:center;justify-content:center;
+  color:var(--ink-3);transition:background .15s,color .15s;
+}
+.dc-heart:hover{background:#F1EFEB;color:var(--ink-2)}
+.dc-heart svg{width:23px;height:23px;display:block}
+.dc-heart svg path{fill:none;stroke:currentColor;stroke-width:1.8;stroke-linejoin:round;
+  transition:fill .18s,stroke .18s}
+.dc-heart.on{color:var(--deck-heart)}
+.dc-heart.on svg path{fill:var(--deck-heart);stroke:var(--deck-heart)}
+/* 实心转空心的「明显反馈」（P2-8）：缩放一下。它比只换填充色更抓眼，
+   而且空心/实心在缩小状态下也分得出来。 */
+@keyframes heartpop{0%{transform:scale(1)}38%{transform:scale(1.34)}100%{transform:scale(1)}}
+.dc-heart.pop svg{animation:heartpop .36s cubic-bezier(.3,.7,.4,1)}
+.dc-heart[disabled]{opacity:.55;cursor:default}
+
+.deckfoot{display:flex;align-items:center;gap:12px;justify-content:center;flex-wrap:wrap;margin-top:18px}
+.deckfoot .dprog{font-size:12.5px;color:var(--ink-3);font-variant-numeric:tabular-nums;min-width:90px;text-align:center}
+.deckfoot .btn.sm{border:1px solid var(--line-2);background:#fff;color:var(--ink)}
+.deckfoot .btn.sm:hover{background:#fff;border-color:var(--ink-3);opacity:1}
+.deckfoot .btn.sm:disabled{opacity:.35}
+
+/* 牌堆下方的补充说明（例如「库里只有这 1 条符合当前筛选」）。空的时候
+   这一行不占高度，所以不留 margin。 */
+.decknotes{font-size:11.5px;color:var(--ink-3);text-align:center;margin-top:10px;min-height:1px;line-height:1.6}
+
+/* 翻阅页的空／错状态。牌堆没有卡可摆时，位置由这段接手，不能留一片空白
+   （P2-7：空库、无收藏、只剩一条、无封面都要有准确状态）。 */
+.deckempty{max-width:420px;text-align:center;padding:40px 20px;color:var(--ink-3);line-height:1.8}
+.deckempty b{display:block;font-size:15px;font-weight:500;color:var(--ink);margin-bottom:8px}
+.deckempty .fthex{margin-top:18px;display:flex;gap:10px;justify-content:center;flex-wrap:wrap}
+
+/* ---------- 快速翻阅：媒体查询 ---------- */
+/* 三段式。中间那档（≤1180）把主卡与位移一起收小，让 918px 的牌堆总宽
+   落回 704px；再往下（≤980）两侧信息栏整块收起，宽度全部让给牌堆。 */
+@media (max-width:1180px){
+  .deck-stage{
+    --deck-cw:300px;--deck-ch:400px;--deck-th:172px;
+    --deck-step:64px;--deck-shrink:.09;--deck-fade:.20;
+  }
+  .dkside{width:176px;padding:20px 10px 36px 18px}
+  .dkside-r{padding:20px 18px 36px 10px}
+}
+@media (max-width:980px){
+  .dkside{display:none}
+  .dkmob{display:flex}
+  .deck-page{min-height:calc(100vh - 58px)}
+  .deck-stage{padding:16px 12px 24px}
+}
+/* ≤640：主卡几乎铺满屏宽。原来这一档是 228×328（只占 390 屏宽的 58%、可用高的 50%，
+   纵向空着 323px），用户真机实测反馈「卡片太小了」。现在给到 300 宽，同时把这一档
+   原本为 228px 卡身准备的**内文紧缩样式整段撤掉**（内边距/字号/爱心尺寸都回到上一档
+   的桌面比例）—— 否则会出现「卡变大了、字还是小的」。
+   位移 step 刻意不跟着卡宽等比放大（44，而不是 60）：等比放大会把第 3 层侧卡推出屏外，
+   而「左右各看得见三层」是规格 4.1 的要求。缩/淡仍沿用 #007 定的较快节奏。 */
+@media (max-width:640px){
+  .deck-stage{
+    --deck-cw:300px;--deck-ch:420px;--deck-th:190px;
+    --deck-step:44px;--deck-shrink:.22;--deck-fade:.24;
+  }
+}
+/* ≤360：窄机型（320/360 宽的安卓、iPhone SE 一代）单独一档。必须单独给，因为
+   deckbox 只有「屏宽 − 24」，300 的卡在 320 屏上会被裁掉；高度也要收，否则在
+   320×568 这类矮屏上卡片会顶出 deckbox（deckbox 是 overflow:hidden）。 */
+@media (max-width:360px){
+  .deck-stage{
+    --deck-cw:264px;--deck-ch:356px;--deck-th:160px;
+    --deck-step:40px;--deck-shrink:.22;--deck-fade:.24;
+  }
+}
+
+/* ---------- 宽窄屏的页面骨架 ---------- */
+@media (max-width:640px){
+  .proj-wrap{padding:16px 12px 80px}
+  .proj-head h1{font-size:18px}
+  .proj-row{padding:12px 13px;gap:12px}
+  .wgrid{grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px}
+}

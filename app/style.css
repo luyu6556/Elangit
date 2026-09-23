@@ -60,6 +60,7 @@ header{
 .btn.ghost{background:transparent;color:var(--ink);border:1px solid var(--line-2);font-weight:400}
 .btn.ghost:hover{background:#fff;opacity:1}
 .btn.sm{height:30px;padding:0 11px;font-size:12.5px}
+.back-icon{width:18px;height:18px;display:block;flex:none}
 .linkbtn{
   font-size:11.5px;line-height:1;color:var(--ink-2);border:1px solid var(--line-2);border-radius:6px;
   padding:4px 8px;background:#fff;transition:border-color .12s,color .12s;display:inline-block;white-space:nowrap;
@@ -147,13 +148,28 @@ textarea.inp{resize:vertical;min-height:84px;line-height:1.6}
    摘要被截断的原因。**标签省下来的那 26px 正好换第 3 行回来。** */
 .csum{font-size:13px;line-height:1.5;color:var(--ink);display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
 .csum.empty{color:var(--ink-3)}
-.ctags{display:flex;flex-wrap:nowrap;gap:4px;margin-top:auto;overflow:hidden}
+/* 标签行：**全部**标签、单行不换行、超宽可横向滚动（2026-09-22 第二版）。
+   上一版是 overflow:hidden + 只画前 3 个 + 灰色「+N」，代价是第 4、5 个标签
+   永远看不到（用户报「标签被遮挡」）。现在改成可滚。
+   关键一点：**「只画 3 个」当初的唯一理由就是防折行**——折行会让标签块从
+   22px 变 47px，同一行卡片的标签顶端因此错开 26px。可滚同样满足那个约束
+   （高度恒为 22px，与标签个数无关），所以不必再拿信息量换整齐。
+   桌面鼠标拖动由 cards.js 的 pointerdown 接管；触摸端走原生横向滑动。
+   `margin-top:auto` 保留：摘要短的时候标签仍然贴底。 */
+.ctags{display:flex;flex-wrap:nowrap;gap:4px;margin-top:auto;
+  min-height:22px;   /* 空标签行也得占满 22px，否则「无标签」那张卡的顶端会偏低 */
+  overflow-x:auto;overflow-y:hidden;scrollbar-width:none;-webkit-overflow-scrolling:touch}
+.ctags::-webkit-scrollbar{display:none}
 .ctags .chip{padding:4px 7px;font-size:11.5px;flex:none}
-/* 余数：跟随最后一个标签的灰色小字，**不是**一枚胶囊。
-   原来的胶囊会自己掉到第二行、独占一行（用户报的「+1 占一行」）。
-   它排在最后，所以万一将来出现超长标签名放不下，被裁掉的是它——
-   降级顺序正好是最不重要的先消失。 */
-.ctags .cmore{font-size:11px;color:var(--ink-3);flex:none;align-self:center}
+/* 「后面还有标签」的唯一提示是右边缘渐隐，而不是再加一个 +N 小字——
+   它和被滑出来的那几个是同一批东西，两个说法只会更乱。
+   滚到最右时撤掉（`at-end`），否则最后一个标签会被渐隐吃掉一半。 */
+.ctags.can-scroll{cursor:grab}
+.ctags.can-scroll.dragging{cursor:grabbing}
+.ctags.can-scroll:not(.at-end){
+  -webkit-mask-image:linear-gradient(to right,#000 calc(100% - 22px),transparent);
+  mask-image:linear-gradient(to right,#000 calc(100% - 22px),transparent);
+}
 
 /* 整页空态。**类名刻意不叫 `empty`**：`.ro.empty`（只读字段为空）、`.csum.empty`（摘要为空）、
    `.sum.empty`（录入页摘要为空）都带有 `empty` 这个类，若这里用 `.empty`，那些小字块会一起继承
@@ -185,6 +201,13 @@ body:not(.is-owner) .owner-only{display:none !important}
 .shot .bar h3{font-size:14px;font-weight:500;flex:1}
 .shot .box{overflow:auto;padding:16px;background:#EFEDE9}
 .shot .box img{max-width:100%;display:block;margin:0 auto;border-radius:6px}
+/* 多图放大层：箭头只覆盖图片区，不挤压原图的可见宽度；首末张由 disabled 明说到头。 */
+.shot .zoom-box{position:relative;padding-left:52px;padding-right:52px}
+.zoom-nav{position:absolute;top:50%;z-index:1;transform:translateY(-50%);width:36px;height:48px;border:0;border-radius:8px;background:rgba(28,27,25,.78);color:#fff;font-size:34px;line-height:1;cursor:pointer}
+.zoom-nav:hover:not(:disabled){background:var(--ink)}
+.zoom-nav:disabled{opacity:.28;cursor:default}
+.zoom-prev{left:8px}.zoom-next{right:8px}
+@media (max-width:600px){.shot .zoom-box{padding-left:44px;padding-right:44px}.zoom-nav{width:32px;height:44px}.zoom-prev{left:6px}.zoom-next{right:6px}}
 
 /* ---------- 分享开关（私有两页的 owner-only 区块） ---------- */
 .shlink{
@@ -344,17 +367,22 @@ main.list{flex:1;min-width:0;padding:24px 20px 80px 8px}
   /* 「更多筛选」开关：夹在抽屉与内容之间，收起时只占一行 */
   .filt-toggle{
     display:flex;align-items:center;gap:8px;width:100%;
-    padding:9px 2px;margin:0;font-size:13px;color:var(--ink-2);
+    padding:7px 2px;margin:0;font-size:13px;color:var(--ink-2);
     border-top:1px solid var(--line);
   }
-  .filt-toggle .ft-a{margin-left:auto;color:var(--ink-3);font-size:11px;transition:transform .18s}
+  .filt-toggle .ft-a{
+    margin-left:auto;width:30px;height:30px;display:flex;align-items:center;justify-content:center;
+    border:1px solid var(--line-2);border-radius:50%;color:var(--ink);font-size:17px;font-weight:500;
+    line-height:1;transition:transform .18s,background .12s;
+  }
+  .filt-toggle:hover .ft-a{background:#fff}
   aside.open .filt-toggle .ft-a{transform:rotate(180deg)}
 
   .filt-body{display:none}
   aside.open .filt-body{display:block;padding:12px 0 4px;border-top:1px solid var(--line)}
   .filt-body .sec:last-child{margin-bottom:8px}
 
-  main.list{padding:14px 12px 80px}
+  main.list{padding:8px 12px 80px}
 
   /* 标签组各占一行、组内横滑：组数多也不至于把侧栏顶到一屏高 */
   .taggroup .chips{flex-wrap:nowrap;overflow-x:auto;padding-bottom:4px;
@@ -383,13 +411,18 @@ main.list{flex:1;min-width:0;padding:24px 20px 80px 8px}
   header > .muted{display:none}
 }
 @media (max-width:460px){
-  header{gap:8px;padding:0 10px}
+  header{gap:6px;padding:0 10px}
   /* 原来这里写的是 .logo{font-size:0}：藏掉「Elangit」四个字、只留那个方块当缩略标识。
      方块删掉之后这条就没有意义了（会剩一个 0 宽的链接），改成整块收起。
      收起是安全的：五个页面里 item 有「← 回到灵感库」按钮，add/stats 顶栏有「灵感库」，
      share 的品牌本来就不是链接（见 share.html 顶部注释）。 */
   header .logo{display:none}
-  header .hnav a{padding:6px 8px;font-size:13px}
+  /* 2026-09-23：顶栏从 3 项导航变成 4 项（新增「项目」）之后，390px 实测
+     出现 1px 横向滚动（内容右边缘 391 > 视口 390）。只减水平内边距与
+     栏间距，不动字号——字号一改，窄屏下这行字就开始挤成两截。
+     实测（390px，所有者态，含最宽的「所有者 · 可编辑」+「退出」）：
+     收窄前 391，收窄后 371，留 19px 余量；375px 机型同样不溢出。 */
+  header .hnav a{padding:6px 6px;font-size:13px}
   header .btn{height:32px;padding:0 12px}
   header .own{padding:3px 7px}
 }

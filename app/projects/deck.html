@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>快速翻阅 · Elangit</title>
+<link rel="stylesheet" href="../style.css">
+<link rel="stylesheet" href="projects.css">
+</head>
+<body>
+
+<header>
+  <a class="logo" href="../index.html">Elangit</a>
+  <nav class="hnav">
+    <a href="../index.html">灵感库</a>
+    <a href="index.html" class="on">项目</a>
+  </nav>
+  <div class="spacer"></div>
+  <span class="muted" id="hdrNote"></span>
+  <span id="ownerBar"></span>
+</header>
+
+<div class="deck-page">
+
+  <!-- 两侧信息栏（桌面）。刻意比浏览页侧栏（224px）更窄：主卡与左右各三层
+       预览牌堆要 918px，侧栏一宽主卡就得缩。窄屏整块收起，改由主卡上方的
+       紧凑入口承担同样的信息（规格 4.1）。 -->
+  <aside class="dkside">
+    <div class="dsec">
+      <h3>当前项目</h3>
+      <div class="dname" id="dname"></div>
+      <div class="dbrief" id="dbrief"></div>
+    </div>
+    <div class="dsec">
+      <h3>默认筛选标签</h3>
+      <div id="dtags"></div>
+    </div>
+    <div class="dsec">
+      <h3>去哪儿</h3>
+      <div class="dlinks">
+        <a class="linkbtn" href="index.html">项目列表</a>
+      </div>
+    </div>
+  </aside>
+
+  <div class="deck-stage" id="stage">
+    <div class="errcard" id="deErr" style="display:none"></div>
+
+    <div class="dkmob">
+      <div class="mname"><a id="dname2" href="#">项目</a></div>
+      <div class="mtag" id="mcount">已收藏 0</div>
+    </div>
+
+    <!-- 牌堆。九张卡（每侧四层，正中一张）绝对定位叠在同一个容器里，
+         位置/缩放/透明度/层级全部由 projects.js 按 CSS 里的 --deck-* 参数算。
+         容器不裁切，裁切交给外面的 .deckbox —— 在容器上裁会把两侧切掉。 -->
+    <div class="deckbox">
+      <div class="deckcards" id="cards"></div>
+    </div>
+
+    <div class="deckempty" id="deckEmpty" style="display:none"></div>
+
+    <div class="deckfoot" id="deckfoot">
+      <button class="btn sm" id="prevBtn" type="button">‹ 上一张</button>
+      <span class="dprog" id="prog"></span>
+      <button class="btn sm" id="nextBtn" type="button">下一张 ›</button>
+    </div>
+    <div class="decknotes" id="deckNotes"></div>
+  </div>
+
+  <aside class="dkside dkside-r">
+    <div class="dsec">
+      <h3>这个项目已收藏</h3>
+      <div class="dstat" id="dcount">0 条</div>
+      <div class="dlist" id="dlist"></div>
+    </div>
+    <div class="dsec">
+      <h3>怎么翻</h3>
+      <div class="dstat">
+        左右拖动牌堆翻页；桌面端也可以按键盘 ← → 或下面的按钮。<br>
+        看到合适的，点卡片右下角的爱心收进这个项目 —— 再点一次取消。
+      </div>
+    </div>
+  </aside>
+
+</div>
+
+<div id="toast"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@tencent-ai/workbuddy-cloud-sdk@dev/lib/index.global.js"></script>
+<script src="../config.js"></script>
+<script src="../auth.js"></script>
+<script src="../cards.js"></script>
+<script src="../store.js"></script>
+<script src="../ownerbar.js"></script>
+<script src="projects.js"></script>
+<script>window.Elangit.projects.initDeck();</script>
+</body>
+</html>

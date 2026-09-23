@@ -16,6 +16,13 @@
 
   function s(v) { return v == null ? '' : String(v).trim(); }
 
+  // 数据页展示的字段顺序也只从这里取。fields() 决定「哪些字段需要对照」，
+  // stats.html 决定「怎样呈现」；两边各维护一份 key 时，新增字段很容易出现
+  // 「算了但没展示」的静默漏项（ai_digest 在 2026-09-22 已真实发生过一次）。
+  var DISPLAY_ORDER = ['category', 'platform', 'tags', 'title', 'summary', 'digest', 'caption', 'ocr_text'];
+
+  function displayOrder() { return DISPLAY_ORDER.slice(); }
+
   // 逐字段对照，返回**全部**受检字段（含没改的），调用方自己过滤。
   //
   // 比哪六个：F2-8 关心的是「用户改了 AI 的结论」，所以只比会被用户改动的
@@ -103,5 +110,5 @@
   }
 
   global.Elangit = global.Elangit || {};
-  global.Elangit.diff = { fields: fields, changed: changed, summary: summary };
+  global.Elangit.diff = { fields: fields, changed: changed, summary: summary, displayOrder: displayOrder };
 })(window);

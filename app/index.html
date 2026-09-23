@@ -12,6 +12,11 @@
   <a class="logo" href="index.html">Elangit</a>
   <nav class="hnav">
     <a href="index.html" class="on">灵感库</a>
+    <!-- 「项目」入口（2026-09-23，项目灵感筛选一期）。放在这里而不是侧栏：
+         侧栏是筛选器区域，混进一个导航会在窄屏被「更多筛选」收起。
+         代价是顶栏多一项——顶栏是不换行 flex，所以这一项必须纳入
+         1440／768／390 三档的版式回归（_verify_home_ui.html）。 -->
+    <a href="projects/index.html">项目</a>
     <a href="add.html" class="owner-only">收进灵感</a>
     <a href="stats.html" class="owner-only">数据</a>
   </nav>
@@ -31,7 +36,7 @@
          桌面端这颗按钮被 CSS 隐藏，下面的 .filt-body 就是个普通 div。
          分享也放进这里：它是配置项不是筛选，但对手机端的高度的要求相同。 -->
     <button class="filt-toggle" id="filtToggle" type="button" aria-expanded="false" aria-controls="filtBody">
-      <span>更多筛选</span><span class="ft-c" id="filtCount"></span><span class="ft-a">▾</span>
+      <span>更多筛选</span><span class="ft-c" id="filtCount"></span><span class="ft-a" aria-hidden="true">⌄</span>
     </button>
 
     <div class="filt-body" id="filtBody">

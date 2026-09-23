@@ -525,12 +525,24 @@
     });
   }
 
+  // “有可用结果”不能只看摘要或标签：详情页还可能保留项目名、设计说明总结、
+  // 画面描述或 OCR。重跑异常时，任一项存在都说明不能把整条素材降成 failed。
+  function hasAiResult(item) {
+    return !!(item && (item.ai_title || item.ai_summary || item.ai_digest || item.ai_caption || item.ocr_text
+      || (item.ai_tags && item.ai_tags.length)));
+  }
+
   function runAi(itemId) {
     var item = findItem(itemId);
     if (!item) return Promise.resolve();
     var tax = state.taxonomy;
     var patch = { status: 'pending' };
     var hasImg = !!(state.raws[itemId] && state.raws[itemId].cover);
+    // E15：AI 开始跑（2026-09-22 新增）。
+    // 为什么必须有这一条：查 id 46 卡住的原因时发现，库里只有 `ai_process_done`，
+    // 于是「从来没开始跑」和「跑了但没回来」在数据上**完全一样**，只能靠猜。
+    // 加一条 start 之后两者一眼可分——这是本次唯一补不回来的观测缺口。
+    T.event('ai_process_start', { item_id: itemId, has_image: hasImg });
     // AI 看的是「当前的封面那张图」（ensureRaw 就按 cover_index 取），
     // 所以 AI 给的矩形属于 cover_index 这一张。等会儿要按这个 seq 落到 item_images。
     var aiSeq = item.cover_index || 0;
@@ -586,7 +598,7 @@
           // F2-7：AI 失败不丢素材。素材已在库里，这里只调状态。
           // 但要注意：如果这条之前已经识别成功过（重跑失败），不能把
           // 好结果标成失败——那会让界面出现「失败」却有摘要的矛盾状态。
-          var hasResult = !!(item.ai_summary || (item.ai_tags && item.ai_tags.length));
+          var hasResult = hasAiResult(item);
           patch.status = hasResult ? 'done' : 'failed';
           patch._ai = {
             error: (e && e.code === 'AI_TIMEOUT') ? 'timeout' : '',
@@ -633,18 +645,41 @@
         }
       });
     }).catch(function (e) {
+      // 兜底。这一层原先**只改内存、不落库**，于是任何走到这里的异常
+      // （图片处理失败、最终入库写失败……）都会让这条素材**永远停在 pending**：
+      // 首页卡片一直转圈显示「识别中」，既不会变成「待补」，也没有重试入口，
+      // 库里还一条线索都不留。2026-09-22 手机端传截图（id 46）踩的就是这个坑
+      // ——事后实测同一条素材的 AI 请求本身完全正常（36.4s 正常返回 JSON），
+      // 但结果永远没落库。
+      // F2-7 写的是「AI 失败不丢素材」，那就必须把失败**记下来**，
+      // 而不是留在内存里等着被刷新清掉。
       var it = findItem(itemId);
-      if (it) { it.status = 'failed'; it._ai = { msg: fmtErr(e) }; renderList(); }
+      if (!it) return;      // 取不到这条就不写：无法判断它是否已有结果，宁可不写也不覆盖
+      // 重跑失败时不能把好结果标成失败（与上面 analyze 的 catch 同一判据）
+      var hasResult = hasAiResult(it);
+      it.status = hasResult ? 'done' : 'failed';
+      it._ai = { msg: fmtErr(e) };
+      renderList();
+      // E16：识别异常退出（走到兜底 catch 的那一类）。带上原文，下次不用再猜。
+      T.event('ai_process_fail', { item_id: itemId, where: 'runAi', msg: fmtErr(e) });
+      if (hasResult) return;   // 已有结果的不改库，免得把 done 覆盖成 failed
+      return S.updateItem(itemId, { status: 'failed' }).catch(function (e2) {
+        // 落库也失败时不再上抛：这条路径下游已经没有处理者，再抛只会变成
+        // 一条未捕获的 Promise 异常，把真正的错误盖掉。
+        console.warn('[ai] 失败状态没写进库：' + S.describe(e2));
+      });
     });
   }
 
   function retry(itemId) {
     var item = findItem(itemId);
-    if (!item) return;
+    // 同一条已经在跑 / 已经排队时不再塞第二次，避免一次点击造成两轮写回。
+    if (!item || item.status !== 'failed' || item.status === 'pending' || aiQueue.indexOf(itemId) >= 0 || state.running === itemId) return false;
     item.status = 'pending';
     item._ai = null;
     renderList();
     enqueueAi(itemId);
+    return true;
   }
 
   /* ---------- 列表渲染 ---------- */
@@ -946,16 +981,36 @@
 
   /* ---------- 启动 ---------- */
 
+  // 详情页失败状态的“重跑 AI”会带 ?retry=<素材 id> 到这里。录入页仍只展示最近
+  // recentLimit 条，但这一次明确指定的素材额外按 id 读取；不能靠扩大最近列表来
+  // 假装解决较早失败素材的恢复问题。
+  var retryId = Number((/[?&]retry=(\d+)/.exec(location.search) || [])[1] || 0);
+
   S.loadTaxonomy().then(function (tax) {
     state.taxonomy = tax;
-    return S.recentItems(cfg.recentLimit);
-  }).then(function (items) {
+    return Promise.all([
+      S.recentItems(cfg.recentLimit),
+      retryId && window.Elangit.auth.isOwner() ? S.fetchItem(retryId) : Promise.resolve(null)
+    ]);
+  }).then(function (r) {
+    var items = r[0], retryItem = r[1];
     state.items = items.map(function (it) { return Object.assign({}, it, { _open: false }); });
-    // 上次没跑完的（识别中／失败）在页面回来后重新排队，F2-7 + F1-4。
+    // 指定重跑的旧失败素材不一定在“最近 8 条”里，单独插进本页内存即可。
+    // 不写库、不改变列表窗口；真正的状态变化仍由 runAi 的既有写回路径完成。
+    if (retryItem && !findItem(retryItem.id)) {
+      state.items.unshift(Object.assign({}, retryItem, { _open: false }));
+    }
+    // 上次没跑完的 pending 素材在页面回来后重新排队，F2-7 + F1-4。
     // 只对所有者做：重跑 AI 是写操作，访客身份下会被门禁挡掉，白报一堆错。
     renderList();
+    var retriedId = 0;
+    var requested = retryId ? findItem(retryId) : null;
+    if (requested && requested.status === 'failed' && window.Elangit.auth.isOwner() && retry(retryId)) {
+      retriedId = retryId;
+      toast('正在重跑素材 #' + retryId + '（AI 调用是串行的）');
+    }
     var stuck = window.Elangit.auth.isOwner()
-      ? state.items.filter(function (it) { return it.status === 'pending'; })
+      ? state.items.filter(function (it) { return it.status === 'pending' && it.id !== retriedId; })
       : [];
     if (stuck.length) {
       toast('有 ' + stuck.length + ' 条上次没识别完，正在接着跑');

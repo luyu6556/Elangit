@@ -20,8 +20,8 @@
   }
   @media (max-width:440px){
     header .logo{font-size:0;gap:0}
-    header .btn.back{font-size:0;padding:0 11px}
-    header .btn.back:after{content:"←";font-size:14px}
+    header .btn.back{width:48px;padding:0;justify-content:center;gap:0}
+    header .btn.back .back-text{display:none}
   }
 
 
@@ -139,7 +139,10 @@
   <!-- 返回按钮放在顶栏而不是正文顶部：顶栏是 sticky 的，滚到哪儿都在。
        原先只有正文顶部一行灰色小字「← 返回灵感库」，一滚动就出屏幕，
        用户找不着——这是真实反馈，不是设想。 -->
-  <a class="btn ghost sm back" href="index.html">← 回到灵感库</a>
+  <a class="btn ghost sm back" href="index.html" aria-label="回到灵感库">
+    <svg class="back-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M12.5 4.5 7 10l5.5 5.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    <span class="back-text">回到灵感库</span>
+  </a>
   <nav class="hnav">
     <a href="add.html" class="owner-only">收进灵感</a>
   </nav>
@@ -202,7 +205,11 @@
       <h3 id="zoomTitle">原图</h3>
       <button class="btn ghost sm" data-close>关闭</button>
     </div>
-    <div class="box" id="zoomBox"></div>
+    <div class="box zoom-box">
+      <button class="zoom-nav zoom-prev" id="zoomPrev" type="button" aria-label="查看上一张" data-zoom-step="-1">‹</button>
+      <div id="zoomBox"></div>
+      <button class="zoom-nav zoom-next" id="zoomNext" type="button" aria-label="查看下一张" data-zoom-step="1">›</button>
+    </div>
   </div>
 </div>
 
@@ -230,18 +237,45 @@
 
   var id = Number((/[?&]id=(\d+)/.exec(location.search) || [])[1] || 0);
 
+  /* ---------- 来自项目翻阅页的返回上下文（项目灵感筛选一期，P2-6） ----------
+     只做一件事：把顶栏那颗返回按钮指向「回到翻阅」，并把项目与卡位号带回去，
+     让用户从详情回到同一张牌。**不改详情本身的任何渲染**，也不动原有返回路径
+     （不复制第二份详情页）。
+     这三个参数只在从牌堆点进来时才存在；直接开 item.html?id=N 时一切照旧。 */
+  var fromDeck = /[?&]from=deck/.test(location.search);
+  var deckPid = Number((/[?&]pid=(\d+)/.exec(location.search) || [])[1] || 0);
+  var deckIdx = Number((/[?&]i=(\d+)/.exec(location.search) || [])[1] || 0);
+  var deckName = '';
+
+  function applyDeckBack() {
+    if (!fromDeck || !deckPid) return;
+    var a = document.querySelector('header a.back');
+    if (a) {
+      a.setAttribute('href', 'projects/deck.html?project=' + deckPid + '&i=' + deckIdx);
+      a.setAttribute('aria-label', '回到项目翻阅');
+      var t = a.querySelector('.back-text');
+      if (t) t.textContent = '回到翻阅';
+    }
+    var crumb = $('dCrumb');
+    if (crumb && deckName) crumb.textContent = '素材 · 来自项目「' + deckName + '」';
+  }
+  // 先把返回按钮改掉：它不依赖任何数据加载，早就该是对的。
+  // 面包屑要等项目名读回来（见下面启动处的 fetchProject），所以那一半
+  // 由 applyDeckBack 在有名字之后再补一次。
+  applyDeckBack();
+
   var state = {
     item: null,
     imgs: [],        // item_images，按 seq 升序
     taxonomy: null,
-    saving: false
+    saving: false,
+    zoomIndex: 0
   };
 
   /* ---------- 小工具 ---------- */
 
   function esc(s) { return OB.esc(s); }
   function fmtErr(e) { return S.describe(e); }
-  function kb(n) { return (n / 1024).toFixed(0) + 'KB'; }
 
   var toastTimer = null;
   function toast(msg) {
@@ -841,7 +875,11 @@
     $('dCrumb').textContent = '素材 #' + it.id + (label ? ' · ' + label : (it.category ? ' · ' + it.category : ''));
 
     var st = it.status === 'pending' ? '<span class="spin"></span>AI 识别中'
-      : (it.status === 'failed' ? 'AI 识别没完成 · 可在录入页重跑' : 'AI 已完成');
+      : (it.status === 'failed'
+          ? (A.isOwner()
+              ? 'AI 识别没完成 · <a class="linkbtn" href="add.html?retry=' + it.id + '">重跑 AI</a>'
+              : 'AI 识别没完成')
+          : 'AI 已完成');
     $('dStatus').innerHTML = st;
 
     renderCover();
@@ -854,10 +892,17 @@
   function zoom(i) {
     var im = state.imgs[i];
     if (!im) return;
-    $('zoomTitle').textContent = '第 ' + (i + 1) + ' / ' + state.imgs.length + ' 张 · '
-      + im.width + '×' + im.height + ' · ' + kb(im.byte_size);
+    state.zoomIndex = i;
+    $('zoomTitle').textContent = '第 ' + (i + 1) + ' / ' + state.imgs.length + ' 张';
     $('zoomBox').innerHTML = '<img src="' + S.toDataUrl(im.mime, im.data_base64) + '" alt="">';
+    // 多图在同一个放大层里切换：封面是入口，不该把第 2 张藏到页面下方。
+    $('zoomPrev').disabled = i === 0;
+    $('zoomNext').disabled = i === state.imgs.length - 1;
     $('zoom').classList.add('on');
+  }
+
+  function stepZoom(delta) {
+    zoom(state.zoomIndex + delta);
   }
 
   /* ---------- 封面重做（F5-8） ---------- */
@@ -951,6 +996,9 @@
     if (e.target.hasAttribute && e.target.hasAttribute('data-close')) { $('zoom').classList.remove('on'); return; }
     if (e.target.id === 'zoom') { $('zoom').classList.remove('on'); return; }
 
+    var step = e.target.closest('[data-zoom-step]');
+    if (step) { stepZoom(Number(step.getAttribute('data-zoom-step'))); return; }
+
     // 放大原图
     var z = e.target.closest('[data-act="zoom"]');
     if (z) { zoom(Number(z.getAttribute('data-i'))); return; }
@@ -1024,6 +1072,31 @@
     if (act === 'del2') { doDelete(); return; }
     if (act === 'delCancel') { resetDelete(); return; }
   });
+
+  // 键盘是桌面端最快的翻图方式；焦点在输入框时不接管方向键，避免影响编辑。
+  document.addEventListener('keydown', function (e) {
+    if (!$('zoom').classList.contains('on')) return;
+    if (/^(INPUT|TEXTAREA|SELECT)$/.test((e.target && e.target.tagName) || '')) return;
+    if (e.key === 'ArrowLeft' && state.zoomIndex > 0) { e.preventDefault(); stepZoom(-1); }
+    if (e.key === 'ArrowRight' && state.zoomIndex < state.imgs.length - 1) { e.preventDefault(); stepZoom(1); }
+  });
+
+  // 手机端横滑只在放大层内生效；纵向移动不触发，避免抢图片滚动。
+  (function () {
+    var x0 = null, y0 = null;
+    $('zoomBox').addEventListener('touchstart', function (e) {
+      var p = e.changedTouches && e.changedTouches[0];
+      if (p) { x0 = p.clientX; y0 = p.clientY; }
+    }, { passive: true });
+    $('zoomBox').addEventListener('touchend', function (e) {
+      var p = e.changedTouches && e.changedTouches[0];
+      if (!p || x0 === null) return;
+      var dx = p.clientX - x0, dy = p.clientY - y0;
+      x0 = y0 = null;
+      if (Math.abs(dx) < 48 || Math.abs(dx) <= Math.abs(dy)) return;
+      stepZoom(dx < 0 ? 1 : -1);
+    }, { passive: true });
+  }());
 
   $('fields').addEventListener('keydown', function (e) {
     var t = e.target;
@@ -1122,12 +1195,20 @@
   if (!id) {
     showErr('网址里没有素材编号（应该形如 item.html?id=12）。返回灵感库点一张卡片进来。');
   } else {
+    // 项目名只用来写面包屑。读不到就不写——不为了一个抬头让整个详情页报错。
+    if (fromDeck && deckPid) {
+      S.fetchProject(deckPid).then(function (p) {
+        if (p) { deckName = p.name || '未命名项目'; applyDeckBack(); }
+      }, function () { /* 读不到项目名不影响详情 */ });
+    }
     Promise.all([S.loadTaxonomy(), S.fetchItem(id), S.getImages(id)]).then(function (r) {
       state.taxonomy = r[0];
       state.item = r[1];
       state.imgs = r[2];
       if (!state.item) { showErr('库里没有 #' + id + ' 这条素材，可能已经被删了。'); return; }
       render();
+      // render 会把面包屑重写成「素材」，所以这里补一次（项目名若已回来）。
+      applyDeckBack();
       if (/[?&]deleted=/.test(location.search)) toast('已删除');
     }).catch(function (e) {
       showErr('读素材失败：' + fmtErr(e));

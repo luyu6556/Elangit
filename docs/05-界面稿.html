@@ -122,9 +122,16 @@
   .linkbtn:hover{border-color:var(--ink-3);color:var(--ink)}
   .cbody{padding:11px 12px 12px;display:flex;flex-direction:column;gap:9px;flex:1}
   .csum{font-size:13px;line-height:1.5;color:var(--ink);display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
-  .ctags{display:flex;flex-wrap:nowrap;gap:4px;margin-top:auto;overflow:hidden}
+  .ctags{display:flex;flex-wrap:nowrap;gap:4px;margin-top:auto;
+    overflow-x:auto;overflow-y:hidden;scrollbar-width:none;-webkit-overflow-scrolling:touch}
+  .ctags::-webkit-scrollbar{display:none}
   .ctags .chip{padding:4px 7px;font-size:11.5px;flex:none}
-  .ctags .cmore{font-size:11px;color:var(--ink-3);flex:none;align-self:center}
+  .ctags.can-scroll{cursor:grab}
+  .ctags.can-scroll.dragging{cursor:grabbing}
+  .ctags.can-scroll:not(.at-end){
+    -webkit-mask-image:linear-gradient(to right,#000 calc(100% - 22px),transparent);
+    mask-image:linear-gradient(to right,#000 calc(100% - 22px),transparent);
+  }
 
   .empty{text-align:center;padding:80px 20px;color:var(--ink-3)}
   .empty b{display:block;color:var(--ink);font-weight:500;font-size:15px;margin-bottom:6px}
@@ -462,9 +469,25 @@ function render(){
       </div>
       <div class="cbody">
         <div class="csum">${esc(i.sum)}</div>
-        <div class="ctags">${tagRow(i.tags.slice(0,3))}${i.tags.length>3?`<span class="cmore">+${i.tags.length-3}</span>`:''}</div>
+        <div class="ctags">${tagRow(i.tags)}</div>
       </div>
     </div>`).join('');
+
+  // 标签行是单行可滚的（2026-09-22）。静态稿也要把「能不能滚 / 滚到头了没有」
+  // 算出来，否则右边缘渐隐一直挂着，看着像最后一个标签被切掉了。
+  document.querySelectorAll('.ctags').forEach(el=>{
+    const over = el.scrollWidth - el.clientWidth;
+    el.classList.toggle('can-scroll', over > 1);
+    el.classList.toggle('at-start', el.scrollLeft <= 1);
+    el.classList.toggle('at-end', over > 1 && el.scrollLeft >= over - 1);
+    if(!el.dataset.scrollWired){
+      el.dataset.scrollWired = '1';
+      el.addEventListener('scroll', ()=>{
+        el.classList.toggle('at-start', el.scrollLeft <= 1);
+        el.classList.toggle('at-end', el.scrollLeft >= (el.scrollWidth - el.clientWidth) - 1);
+      });
+    }
+  });
 
   $('#grid').style.display = list.length ? '' : 'none';
   $('#empty').style.display = list.length ? 'none' : '';

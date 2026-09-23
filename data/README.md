@@ -4,9 +4,9 @@
 
 # data/ · 数据库快照
 
-**快照时间**：2026-09-20
+**快照时间**：2026-09-20（`schema.sql` 于 2026-09-23 补入两张新表，见下）
 **来源**：线上库（应用 `wbapp_az0Z1pxT1CjCvbUNffduqc`，端点 `https://elangit.app.workbuddy.host`）
-**生成方式**：`app/_verify_dump.html` 用应用自己的 SDK 读出全库 7 张表 → POST 给本机接收端落盘 → 再用脚本加工成下面的文件。**中间没有人工编辑，也没有经过任何模型的上下文。**
+**生成方式**：`app/_verify_dump.html` 用应用自己的 SDK 读出全库的表（那次是 7 张）→ POST 给本机接收端落盘 → 再用脚本加工成下面的文件。**中间没有人工编辑，也没有经过任何模型的上下文。**
 
 ---
 
@@ -14,7 +14,7 @@
 
 | 文件 | 内容 | 大小 |
 |---|---|---|
-| `schema.sql` | 7 张表的 DDL + 索引 + GRANT + RLS 策略。**从线上库实际导出**，可直接重建 | ~7 KB |
+| `schema.sql` | **9 张表**的 DDL + 索引 + GRANT + RLS 策略。前 7 张**从线上库实际导出**；后 2 张（`projects`／`project_items`，2026-09-23 项目灵感筛选一期）是按 `migrations/2026-09-23-project-inspiration-phase1.sql` 在线上执行并回读后补写的 | ~11 KB |
 | `dump.sql` | 全库数据的 INSERT（含 `id`）。含 `items.cover_thumb` 与图片 base64，所以偏大 | ~975 KB |
 | `items.json` | 素材的**文本字段**（不含图片与缩略图），给人/agent 直接读 | ~4 KB |
 | `images/` | 从 `item_images.data_base64` 解出来的 3 个真实图片文件 | ~670 KB |
@@ -38,7 +38,7 @@ python3 recv.py "<.../Elan git/data>" 8792
 # 2. 起应用自己的本地服务，然后在浏览器打开「导出台」点一下按钮
 cd app && python3 _serve.py        # http://127.0.0.1:8791
 #   打开 http://127.0.0.1:8791/_verify_dump.html  → 点「开始导出」
-#   页面会用应用自己的 SDK 读出 7 张表，POST 给 127.0.0.1:8792
+#   页面会用应用自己的 SDK 读出全库的表（当时 7 张），POST 给 127.0.0.1:8792
 
 # 3. 加工成 dump.sql / items.json / images/
 python3 process-dump.py            # 注意：脚本里的 DATA_DIR 写死了路径，换机器要改
@@ -57,10 +57,11 @@ psql "$DATABASE_URL" -f dump.sql        # 2. 灌数据
 
 ⚠️ **两个必须知道的坑**：
 
-1. **6 张表的 `id` 是 `GENERATED ALWAYS AS IDENTITY`**（categories / tag_groups / tags / items / item_images / events）。显式写 `id` 必须带 `OVERRIDING SYSTEM VALUE`，否则会被拒绝。`dump.sql` 里每条 INSERT 已经带了。
+1. **7 张表的 `id` 是 `GENERATED ALWAYS AS IDENTITY`**（categories / tag_groups / tags / items / item_images / events，以及 2026-09-23 新增的 projects）。显式写 `id` 必须带 `OVERRIDING SYSTEM VALUE`，否则会被拒绝。`dump.sql` 里每条 INSERT 已经带了。
 2. **灌完数据要 `setval` 重置 identity 序列**，否则后续新增会从 1 开始撞号。`dump.sql` 每个表末尾已附 `select setval(...)`。
+3. **`dump.sql` 里没有 `projects`／`project_items` 的数据**（这两张表是快照之后才建的）。按上面顺序还原出来的库里，这两张表是空的——这是正确的，不是漏灌。
 
-（`settings` 表例外：它的 `id` 是 `smallint default 1` 且有 `check (id = 1)`，不是 identity。）
+（`settings` 表例外：它的 `id` 是 `smallint default 1` 且有 `check (id = 1)`，不是 identity。`project_items` 也没有 `id` 列，主键是 `(project_id, item_id)`。）
 
 ---
 
@@ -77,6 +78,8 @@ psql "$DATABASE_URL" -f dump.sql        # 2. 灌数据
 | `events` | 1 | 埋点。只记不可派生的过程量 |
 
 **注意**：`events` 只有 1 行不是因为埋点没做，而是因为验收期间产生的测试事件已经清空了——那是刻意的，避免让数据页把 QA 的动作当成使用数据。真实使用起来之后它会自己长出来。
+
+**2026-09-23 之后线上另有 `projects`／`project_items` 两张表**（项目灵感筛选一期），本快照导出于它们建立之前，所以不在这份 dump 里；它们的结构已补进 `schema.sql`。证据见 `features/项目灵感筛选/项目修改记录.md` #014 与 `docs/构建记录.md` #039。
 
 ---
 

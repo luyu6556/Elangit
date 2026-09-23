@@ -310,9 +310,9 @@
       return;
     }
 
-    // 字段表的显示顺序（2026-09-22 补 digest）。这张表只列 order 里的字段——
-    // 漏一个，diff 那边算出来了也不会显示，A2 就永远量不到那个字段。
-    var order = ['category', 'platform', 'tags', 'title', 'summary', 'digest', 'caption', 'ocr_text'];
+    // 展示顺序从 diff.js 取：它是「哪些 AI 字段需要对照」的唯一来源。
+    // 若新增字段却没有同步到该模块，验证台会直接失败，不能再静默漏掉。
+    var order = D.displayOrder();
     var rows = order.filter(function (k) { return s.byField[k]; }).map(function (k) {
       var f = s.byField[k];
       // 分母是「AI 真的产出过这个字段」的样本数，不是「有原值的素材数」（P0-2）。

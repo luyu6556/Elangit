@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>项目工作台 · Elangit</title>
+<link rel="stylesheet" href="../style.css">
+<link rel="stylesheet" href="projects.css">
+</head>
+<body>
+
+<header>
+  <a class="logo" href="../index.html">Elangit</a>
+  <nav class="hnav">
+    <a href="../index.html">灵感库</a>
+    <a href="index.html" class="on">项目</a>
+    <a href="../add.html" class="owner-only">收进灵感</a>
+  </nav>
+  <div class="spacer"></div>
+  <span class="muted" id="hdrNote"></span>
+  <span id="ownerBar"></span>
+</header>
+
+<main class="proj-wrap">
+  <div class="proj-crumb"><a href="index.html">项目</a><span>/</span><span>工作台</span></div>
+
+  <div class="errcard" id="wsErr" style="display:none"></div>
+
+  <div class="proj-head">
+    <h1 id="wsName">…</h1>
+    <div class="sp"></div>
+    <div class="acts">
+      <a class="btn sm" id="deckLink" href="#">开始翻阅</a>
+      <button class="btn ghost sm owner-only" id="editBtn" type="button">编辑</button>
+      <button class="btn ghost sm owner-only" id="archiveBtn" type="button">归档</button>
+      <button class="btn ghost sm owner-only" id="delBtn" type="button">删除</button>
+    </div>
+  </div>
+
+  <!-- 删除的二次确认就地展开（P1-5）。文案里点名「素材一条都不动」，
+       因为这是用户在这一步最需要确认的事。 -->
+  <div class="pconfirm" id="delConfirm" style="display:none;border-top:none;padding-top:0;margin-bottom:18px">
+    <span class="warn" id="delWarn"></span>
+    <button class="btn ghost sm" id="delCancel" type="button">取消</button>
+    <button class="btn del sm" id="delGo" type="button">确认删除</button>
+  </div>
+
+  <section class="panel">
+    <h2>项目构思</h2>
+    <div id="wsBrief"></div>
+    <div class="fl">默认筛选标签</div>
+    <div id="wsTags"></div>
+  </section>
+
+  <div class="panel pform" id="editPanel">
+    <h2>编辑项目</h2>
+    <div id="editBody"></div>
+  </div>
+
+  <section class="panel">
+    <h2>项目素材集 <span class="ws-count" id="wsCount"></span></h2>
+    <div class="whint" id="reorderHint" style="display:none">
+      按住每张卡右下角的「⠿ 排序」拖动，可以调整它们在本项目里的顺序。顺序只影响这个项目，不改素材本身。
+    </div>
+    <div class="wgrid" id="grid"></div>
+    <div class="emptystate" id="wsEmpty" style="display:none"></div>
+  </section>
+</main>
+
+<div id="toast"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@tencent-ai/workbuddy-cloud-sdk@dev/lib/index.global.js"></script>
+<script src="../config.js"></script>
+<script src="../auth.js"></script>
+<script src="../cards.js"></script>
+<script src="../store.js"></script>
+<script src="../ownerbar.js"></script>
+<script src="projects.js"></script>
+<script>window.Elangit.projects.initWorkspace();</script>
+</body>
+</html>

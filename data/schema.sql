@@ -1,16 +1,22 @@
 -- ============================================================
--- Elangit 数据库结构（2026-09-20 从线上库实际导出，非手写）
+-- Elangit 数据库结构（2026-09-20 从线上库实际导出；2026-09-23 追加第 8、9 两张表）
 -- ------------------------------------------------------------
 -- 平台：WorkBuddy 云服务 Database 模块（PostgreSQL + PostgREST 风格 API）
 -- 应用：wbapp_az0Z1pxT1CjCvbUNffduqc
 -- 端点：https://elangit.app.workbuddy.host
 --
--- 这份 DDL 与线上库一致，可直接用于重建。执行顺序：先建 7 张表，再建索引与策略，
+-- 这份 DDL 与线上库一致，可直接用于重建。执行顺序：先建 9 张表，再建索引与策略，
 -- 最后灌数据（dump.sql）。
+--
+-- ⚠️ 第 8、9 张表（projects / project_items）**不是** 2026-09-20 那次导出的内容，
+--    而是 2026-09-23 按 `data/migrations/2026-09-23-project-inspiration-phase1.sql`
+--    在线上执行后，逐条回读结构、约束、索引、RLS 与 anon 权限并核对一致才补写的。
+--    回读证据与执行限制见 `features/项目灵感筛选/项目修改记录.md` 的 #014。
 --
 -- ★ 两条容易漏的门（漏了会得到形似「策略失效」的 42501）：
 --   1. GRANT 和 CREATE POLICY 是两道独立的门。只写策略不 GRANT，匿名角色连表都碰不到。
---   2. 6 张表的 id 是 GENERATED ALWAYS AS IDENTITY，灌数据必须带 OVERRIDING SYSTEM VALUE。
+--   2. 7 张表的 id 是 GENERATED ALWAYS AS IDENTITY，灌数据必须带 OVERRIDING SYSTEM VALUE。
+--      （settings 不是 identity；新增的 project_items 没有 id 列，主键是复合的。）
 -- ============================================================
 
 -- ---------- 1. categories（抽屉：封闭集合，AI 只能从中选一个） ----------
@@ -129,12 +135,47 @@ create table events (
   created_at timestamptz not null default now()
 );
 
+-- ---------- 8. projects（设计项目，项目灵感筛选一期 · 2026-09-23 线上新增） ----------
+-- 与 items 完全解耦：项目 ID、项目收藏、项目内排序都不写进 items，
+-- 否则同一条素材进入多个项目时会互相覆盖。
+create table projects (
+  id          bigint generated always as identity primary key,
+  user_id     text not null default 'local-owner',
+  -- 页面把空输入归一为「未命名项目」；这里再给一次默认值，
+  -- 防止其他写入入口遗漏这条规则。
+  name        text not null default '未命名项目',
+  brief       text,
+  -- 从既有 tags.name 选择，存标签名而不是 tag id：items.ai_tags / my_tags
+  -- 也是 text[]，翻阅时可对两列的并集直接做「任一命中」判断。
+  filter_tags text[] not null default '{}',
+  status      text not null default 'active',
+  created_at  timestamptz not null default now(),
+  updated_at  timestamptz not null default now(),
+  constraint projects_status_check check (status in ('active', 'archived'))
+);
+
+-- ---------- 9. project_items（项目与素材的多对多关系 · 2026-09-23 线上新增） ----------
+-- 没有 id 列，主键就是 (project_id, item_id)：同一素材在同一项目只留一条关联，
+-- 但可在不同项目分别出现。两个外键都 cascade，保证原素材删除后不留下可点击引用。
+create table project_items (
+  project_id bigint not null references projects (id) on delete cascade,
+  item_id    bigint not null references items (id) on delete cascade,
+  saved_at   timestamptz not null default now(),
+  -- 只定义项目内顺序；同一素材进入另一项目时拥有独立顺序。
+  sort_order integer not null default 0,
+  primary key (project_id, item_id)
+);
+
 -- ---------- 索引 ----------
 create index items_created_at_idx on items (created_at desc);
 create index items_category_idx   on items (category);
 create index item_images_item_id_idx on item_images (item_id);
 create index tags_group_id_idx    on tags (group_id);
 create index events_at_desc       on events (at desc);
+-- 2026-09-23 追加：工作台按状态／新旧排序；项目素材集按手动顺序读取；item_id 索引用于查「被哪些项目引用」。
+create index projects_status_updated_idx on projects (status, updated_at desc);
+create index project_items_project_order_idx on project_items (project_id, sort_order, saved_at desc);
+create index project_items_item_id_idx on project_items (item_id);
 
 -- ---------- 权限与行级安全 ----------
 -- 两道门都要开：GRANT（能不能碰这张表）+ POLICY（能碰哪些行）。
@@ -142,6 +183,8 @@ create index events_at_desc       on events (at desc);
 -- （R-1 已接受这个降级）。它拦的是误操作与路人，不是攻击者。
 grant select, insert, update, delete on categories, tag_groups, tags, settings,
       items, item_images, events to anon, authenticated;
+-- 2026-09-23 追加：与既有七张表同一模型（无账号体系，写操作由前端 guard() 拦截）。
+grant select, insert, update, delete on projects, project_items to anon, authenticated;
 
 alter table categories  enable row level security;
 alter table tag_groups  enable row level security;
@@ -150,6 +193,9 @@ alter table settings    enable row level security;
 alter table items       enable row level security;
 alter table item_images enable row level security;
 alter table events      enable row level security;
+-- 2026-09-23 追加
+alter table projects      enable row level security;
+alter table project_items enable row level security;
 
 create policy categories_all  on categories  for all using (true) with check (true);
 create policy tag_groups_all  on tag_groups  for all using (true) with check (true);
@@ -158,3 +204,6 @@ create policy settings_all    on settings    for all using (true) with check (tr
 create policy items_all       on items       for all using (true) with check (true);
 create policy item_images_all on item_images for all using (true) with check (true);
 create policy events_all      on events      for all using (true) with check (true);
+-- 2026-09-23 追加
+create policy projects_all      on projects      for all using (true) with check (true);
+create policy project_items_all on project_items for all using (true) with check (true);

@@ -238,6 +238,160 @@
       .then(function (r) { unwrap(r, '读卡片缩略图'); return r.data || []; });
   }
 
+  /* ---------- 项目灵感筛选（一期） ---------- */
+
+  // 项目与素材保持两张独立表：items 是素材唯一真值，不能写项目 ID、收藏状态
+  // 或项目内排序。这里也刻意不取 item_images.data_base64；翻阅页应先用
+  // loadIndex()，再用 cardsByIds() 按需补 400px 卡面。
+  var PROJECT_COLS = 'id,user_id,name,brief,filter_tags,status,created_at,updated_at';
+  var PROJECT_ITEM_COLS = 'project_id,item_id,saved_at,sort_order';
+
+  // PostgreSQL 的 default 只在省略列时生效，传空串会原样写进 name。因此所有
+  // 项目写入入口都在这里归一化，页面不需要也不允许各自复制这条规则。
+  function projectName(value) {
+    var name = value == null ? '' : String(value).trim();
+    return name || '未命名项目';
+  }
+
+  function projectTags(value) {
+    if (!Array.isArray(value)) return [];
+    var seen = {};
+    return value.map(function (tag) { return String(tag == null ? '' : tag).trim(); })
+      .filter(function (tag) {
+        if (!tag || seen[tag]) return false;
+        seen[tag] = true;
+        return true;
+      });
+  }
+
+  function projectPatch(patch, creating) {
+    var source = patch || {};
+    var body = {};
+    if (creating || Object.prototype.hasOwnProperty.call(source, 'name')) body.name = projectName(source.name);
+    if (Object.prototype.hasOwnProperty.call(source, 'brief')) body.brief = source.brief == null ? null : String(source.brief);
+    if (creating || Object.prototype.hasOwnProperty.call(source, 'filter_tags')) body.filter_tags = projectTags(source.filter_tags);
+    if (Object.prototype.hasOwnProperty.call(source, 'status')) {
+      if (source.status !== 'active' && source.status !== 'archived') throw new Error('项目状态无效');
+      body.status = source.status;
+    }
+    return body;
+  }
+
+  function listProjects() {
+    return cloud.database.from('projects').select(PROJECT_COLS)
+      .order('status', { ascending: true }).order('updated_at', { ascending: false })
+      .then(function (r) { unwrap(r, '读项目列表'); return r.data || []; });
+  }
+
+  function fetchProject(id) {
+    return cloud.database.from('projects').select(PROJECT_COLS).eq('id', id).limit(1)
+      .then(function (r) {
+        unwrap(r, '读项目');
+        return (r.data || [])[0] || null;
+      });
+  }
+
+  function createProject(row) {
+    var body = projectPatch(row, true);
+    if (!body.status) body.status = 'active';
+    return guard().then(function () {
+      return cloud.database.from('projects').insert(body).select(PROJECT_COLS);
+    }).then(function (r) {
+      unwrap(r, '建项目');
+      var project = (r.data || [])[0];
+      if (!project) throw new Error('建项目失败：数据库没有返回新建的行');
+      return project;
+    });
+  }
+
+  function updateProject(id, patch) {
+    var body = projectPatch(patch, false);
+    body.updated_at = new Date().toISOString();
+    return guard().then(function () {
+      return cloud.database.from('projects').update(body).eq('id', id).select(PROJECT_COLS);
+    }).then(function (r) {
+      unwrap(r, '更新项目');
+      return (r.data || [])[0] || null;
+    });
+  }
+
+  function archiveProject(id) { return updateProject(id, { status: 'archived' }); }
+  function restoreProject(id) { return updateProject(id, { status: 'active' }); }
+
+  function deleteProject(id) {
+    return guard().then(function () {
+      // project_items 的 project_id 是 ON DELETE CASCADE；删项目只会删关联，不会碰 items。
+      return cloud.database.from('projects').delete().eq('id', id).select('id');
+    }).then(function (r) { unwrap(r, '删除项目'); return true; });
+  }
+
+  function listProjectItems(projectId) {
+    return cloud.database.from('project_items').select(PROJECT_ITEM_COLS).eq('project_id', projectId)
+      .order('sort_order', { ascending: true }).order('saved_at', { ascending: false })
+      .then(function (r) { unwrap(r, '读项目素材'); return r.data || []; });
+  }
+
+  function saveProjectItem(projectId, itemId) {
+    return guard().then(function () {
+      // 单用户产品仍要显式读取最大序号，避免新收藏与手动排序混用时回到 0。
+      return listProjectItems(projectId);
+    }).then(function (rows) {
+      var last = rows.reduce(function (max, row) { return Math.max(max, Number(row.sort_order) || 0); }, -1);
+      return cloud.database.from('project_items')
+        .insert({ project_id: projectId, item_id: itemId, sort_order: last + 1 })
+        .select(PROJECT_ITEM_COLS);
+    }).then(function (r) {
+      unwrap(r, '收藏项目素材');
+      var row = (r.data || [])[0];
+      if (!row) throw new Error('收藏项目素材失败：数据库没有返回新建的关联');
+      return row;
+    });
+  }
+
+  function removeProjectItem(projectId, itemId) {
+    return guard().then(function () {
+      return cloud.database.from('project_items').delete()
+        .eq('project_id', projectId).eq('item_id', itemId).select(PROJECT_ITEM_COLS);
+    }).then(function (r) { unwrap(r, '取消项目收藏'); return true; });
+  }
+
+  function rewriteProjectItemOrder(projectId, itemIds) {
+    if (!Array.isArray(itemIds) || !itemIds.length) {
+      return listProjectItems(projectId).then(function (rows) {
+        if (rows.length) throw new Error('项目排序不完整：不能用空数组覆盖已有素材');
+        return [];
+      });
+    }
+    var unique = {};
+    itemIds.forEach(function (id) {
+      if (id == null || unique[id]) throw new Error('项目排序无效：素材 ID 不能为空或重复');
+      unique[id] = true;
+    });
+    return guard().then(function () {
+      return listProjectItems(projectId);
+    }).then(function (rows) {
+      if (rows.length !== itemIds.length || rows.some(function (row) { return !unique[row.item_id]; })) {
+        throw new Error('项目排序不完整：必须一次提交该项目全部素材且不能增删关联');
+      }
+      var byId = {};
+      rows.forEach(function (row) { byId[row.item_id] = row; });
+      var body = itemIds.map(function (itemId, index) {
+        return {
+          project_id: projectId,
+          item_id: itemId,
+          // 批量 upsert 是一条数据库写入，避免逐行改 sort_order 产生短暂重复序号。
+          saved_at: byId[itemId].saved_at,
+          sort_order: index
+        };
+      });
+      return cloud.database.from('project_items')
+        .upsert(body, { onConflict: 'project_id,item_id' }).select(PROJECT_ITEM_COLS);
+    }).then(function (r) {
+      unwrap(r, '重排项目素材');
+      return r.data || [];
+    });
+  }
+
   /* ---------- 分享（任务 7 / F6） ---------- */
 
   // settings 是单条记录（id 恒为 1）。**读不加门禁**：分享页要先读它才能判断
@@ -375,6 +529,17 @@
     countImages: countImages,
     loadIndex: loadIndex,
     cardsByIds: cardsByIds,
+    listProjects: listProjects,
+    fetchProject: fetchProject,
+    createProject: createProject,
+    updateProject: updateProject,
+    archiveProject: archiveProject,
+    restoreProject: restoreProject,
+    deleteProject: deleteProject,
+    listProjectItems: listProjectItems,
+    saveProjectItem: saveProjectItem,
+    removeProjectItem: removeProjectItem,
+    rewriteProjectItemOrder: rewriteProjectItemOrder,
     getSettings: getSettings,
     updateSettings: updateSettings,
     fetchItemByShareToken: fetchItemByShareToken,

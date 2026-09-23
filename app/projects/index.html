@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>项目 · Elangit</title>
+<!-- style.css 在前、projects.css 在后：本功能的样式一律画在共用构件之上，
+     不重写共用令牌（PRD 5.2：不为新功能另造一套视觉语言）。 -->
+<link rel="stylesheet" href="../style.css">
+<link rel="stylesheet" href="projects.css">
+</head>
+<body>
+
+<header>
+  <a class="logo" href="../index.html">Elangit</a>
+  <nav class="hnav">
+    <a href="../index.html">灵感库</a>
+    <a href="index.html" class="on">项目</a>
+    <a href="../add.html" class="owner-only">收进灵感</a>
+    <a href="../stats.html" class="owner-only">数据</a>
+  </nav>
+  <div class="spacer"></div>
+  <span class="muted" id="hdrNote">加载中…</span>
+  <span id="ownerBar"></span>
+</header>
+
+<main class="proj-wrap">
+  <div class="proj-head">
+    <h1>项目</h1>
+    <div class="sp"></div>
+    <div class="acts">
+      <!-- 「项目」这个入口对访客也开放（项目列表与翻阅是只读可看的），
+           但新建是写操作，所以按钮挂 .owner-only。 -->
+      <button class="btn sm owner-only" id="newBtn" type="button">＋ 新建项目</button>
+    </div>
+  </div>
+
+  <div class="panel pform" id="formPanel">
+    <h2>新建项目</h2>
+    <div id="formBody"></div>
+  </div>
+
+  <div id="list"></div>
+</main>
+
+<div id="toast"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@tencent-ai/workbuddy-cloud-sdk@dev/lib/index.global.js"></script>
+<script src="../config.js"></script>
+<script src="../auth.js"></script>
+<script src="../cards.js"></script>
+<script src="../store.js"></script>
+<script src="../ownerbar.js"></script>
+<script src="projects.js"></script>
+<script>window.Elangit.projects.initList();</script>
+</body>
+</html>

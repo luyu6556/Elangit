@@ -18,6 +18,7 @@
  *   Elangit.cards.navTagsHtml(tax, index, activeTags)
  *   Elangit.cards.cardHtml(it, thumbRow, tax, {openAct})
  *   Elangit.cards.haystack(it) / matches(it, {cat, tags, q})
+ *   Elangit.cards.refreshTagScroll(root)              重算标签行「能不能滚」（含拖动）
  *   Elangit.cards.emptyHtml(indexLen, filtering)
  *   Elangit.cards.countText(shown, total)
  * ============================================================ */
@@ -127,6 +128,7 @@
   /* ---------- 卡片 ---------- */
 
   function cardHtml(it, thumbRow, tax, opts) {
+    ensureTagScroll();      // 幂等：第一次渲染卡片时把标签行拖动接上
     opts = opts || {};
     var c = thumbRow || {};
     var hasThumb = !!c.cover_thumb;
@@ -155,15 +157,17 @@
       thumb = '<div class="cthumb notxt"><p>这条没有配图<br>纯文本素材照样进库</p></div>';
     }
 
+    // 卡片上放**全部**标签，单行不换行、超宽时横向滚动（2026-09-22 第二版）。
+    //
+    // 上一版是「只放 3 个 + 灰色 +N」，理由是「3 个最坏 230px，留 28px 给余数，
+    // 一行永远放得下」。那个算术没错，但**结论错了**：折行确实要防，可防法不该是
+    // 把标签丢掉——用户看不到第 4、5 个标签，于是报「标签被遮挡」。
+    //
+    // 现在改成：标签全放，`.ctags` 单行 `overflow-x:auto`。卡片高度因此恒为 22px，
+    // 与标签个数无关（折行错位的问题一样解决了），而藏起来的标签**滑一下就能看到**。
+    // 「还有更多」的提示交给右边缘渐隐（见 style.css 的 `.ctags.can-scroll`），
+    // 不再塞一个 `+N`——它和被滑出来的那几个是同一批东西，重复表达只会更乱。
     var tags = (it.ai_tags || []).concat(it.my_tags || []);
-    // 卡片上只放 3 个标签。为什么是 3 而不是 4：
-    // 标签是变宽的（实测 5 字 74px / 4 字 62px / 3 字 51px / 2 字 39px，间距 4px），
-    // 而卡片内容宽只有 258px。放 4 个最坏要 249–255px，已经贴死上限——再挂一个
-    // 余数必然折行；折行会让标签块从 22px 变成 47px，同一行卡片的标签顶端因此
-    // 错开 26px（底端对齐、顶端不齐），看起来就是「没对齐」。
-    // 3 个最坏 3×74+8 = 230px，留 28px 给余数，一行永远放得下。
-    // 代价是信息量少一个标签，但详情页有全部标签，权衡划算。
-    var shownTags = tags.slice(0, 3);
     var title = (it.ai_title || '').trim();
     var act = opts.openAct || 'open';
 
@@ -180,13 +184,12 @@
         + (title ? esc(title) : '未命名') + '</div>'
       + '<div class="cbody">'
         + '<div class="csum' + (it.ai_summary ? '' : ' empty') + '">'
-          + (it.ai_summary ? esc(it.ai_summary) : (it.raw_text ? esc(it.raw_text.slice(0, 80)) : '（没有文字内容）'))
+          // 没拿到 AI 摘要时拿 raw_text 顶一下。60 字不是字数（2026-09-22 第三轮）：
+          // 之前是 80，3 行放不下（实测 xhs 链接那条 86 字被压到第 4 行，被截掉一半
+          // 看着像"坏了"）；60 字=3 行下差不多放满，截不断。
+          + (it.ai_summary ? esc(it.ai_summary) : (it.raw_text ? esc(it.raw_text.slice(0, 60)) : '（没有文字内容）'))
         + '</div>'
-        + '<div class="ctags">' + shownTags.map(function (t) { return tagChip(tax, t, {}); }).join('')
-          // 余数不再是一枚胶囊。原来是独立 chip，放不下时它会自己掉到第二行、
-          // 孤零零占一整行——那正是用户看到的「+1 占一行」。改成跟随在最后一个
-          // 标签后面的灰色小字，不占独立宽度，也就没有「掉行」这回事。
-          + (tags.length > 3 ? '<span class="cmore">+' + (tags.length - 3) + '</span>' : '')
+        + '<div class="ctags">' + tags.map(function (t) { return tagChip(tax, t, {}); }).join('')
         + '</div>'
       + '</div>'
       + '<div class="cmrow">'
@@ -206,6 +209,115 @@
     return (hasOriginals ? '<button class="linkbtn" data-act="shot" data-id="' + it.id + '">看原始截图</button>' : '')
       + (it.source_url ? '<a class="linkbtn" href="' + esc(it.source_url) + '" target="_blank" rel="noopener">原文</a>' : '')
       + (c.cover_thumb || it.source_url ? '' : '<span class="muted">没有原图也没有链接</span>');
+  }
+
+  /* ---------- 卡片标签行的横向滚动（2026-09-22） ---------- */
+
+  // 为什么需要这一段：`.ctags` 现在是 overflow-x:auto。触摸屏的横向滑动浏览器
+  // 本来就给了，不用管；但**桌面鼠标没有横向滚动手势**——滚轮滚的是页面纵向，
+  // 于是后面的标签在电脑上根本够不着。这里只补浏览器没给的那两件事：
+  //   1. 鼠标按住标签行左右拖 = 改 scrollLeft；
+  //   2. 拖动之后那一下 click 必须丢掉，否则鼠标一滑，卡片就跳进详情页。
+  //      （卡片点击是 document 冒泡阶段代理的，见 index.html；hover 高亮与
+  //      整块点击区让这个冲突变成必然，不是理论风险。）
+  //
+  // 为什么**不**接管触摸：触摸端若 preventDefault，会跟浏览器原生惯性滚动打架，
+  // 而且 iOS 在开始滚动后会发 pointercancel、不再给 pointermove，写一半更脆。
+  // 交给 `overflow-x:auto` 原生处理，行为与系统一致。
+  var DRAG_SLOP = 6;      // 位移小于此值算「点」，不接管，免得吃掉正常点击
+  var draggedAt = 0;      // 最近一次拖动松手的时间，用来吞掉紧随其后的 click
+  var tagScrollBound = false;
+
+  function syncTags(el) {
+    var over = el.scrollWidth - el.clientWidth;
+    el.classList.toggle('can-scroll', over > 1);
+    el.classList.toggle('at-start', el.scrollLeft <= 1);
+    el.classList.toggle('at-end', over > 1 && el.scrollLeft >= over - 1);
+  }
+
+  // root 必须是**包含** .ctags 的祖先（拖动时传 el.parentNode）
+  function refreshTagScroll(root) {
+    if (!root) return;
+    var list = root.querySelectorAll ? root.querySelectorAll('.ctags') : [];
+    for (var i = 0; i < list.length; i++) syncTags(list[i]);
+  }
+
+  // 为什么要 MutationObserver，而不是让各页面渲染完自己调一次：
+  // 卡片是「整块 innerHTML 重画」的（搜索、切筛选、翻页都会重画），
+  // 每处重画都得记得调一次同步——漏掉一处，那一屏的标签就没有渐隐提示。
+  // 这里只处理**新增节点**里的 .ctags，不做全页重算：全页重算会在每帧对
+  // 每张卡强制一次布局（20 张卡 = 20 次），而卡片重画的频率并不低。
+  //
+  // 由 cardHtml 首次调用时装上（见函数末尾）。这样 index / share / stats
+  // 三个页面都不用各自记得接一次——少一个「新页面忘了接」的失败模式。
+  function ensureTagScroll() {
+    if (tagScrollBound || !document.body) return;
+    tagScrollBound = true;
+
+    var el = null, startX = 0, startLeft = 0, moved = false;
+
+    document.addEventListener('pointerdown', function (e) {
+      if (e.pointerType !== 'mouse' || e.button !== 0) return;
+      var box = e.target.closest && e.target.closest('.ctags');
+      if (!box) return;
+      if (box.scrollWidth - box.clientWidth <= 1) return;   // 没得滚就别接管
+      el = box; startX = e.clientX; startLeft = box.scrollLeft; moved = false;
+      box.classList.add('dragging');
+      e.preventDefault();                                   // 否则一拖就是整片文字选中
+    });
+
+    document.addEventListener('pointermove', function (e) {
+      if (!el || e.pointerType !== 'mouse') return;
+      var dx = e.clientX - startX;
+      if (!moved && Math.abs(dx) < DRAG_SLOP) return;
+      moved = true;
+      el.scrollLeft = startLeft - dx;
+      syncTags(el);
+    });
+
+    function endDrag() {
+      if (!el) return;
+      el.classList.remove('dragging');
+      if (moved) draggedAt = Date.now();
+      el = null; moved = false;
+    }
+    document.addEventListener('pointerup', endDrag);
+    document.addEventListener('pointercancel', endDrag);
+
+    // 捕获阶段拦下拖动之后的那一下 click。用捕获而不是冒泡：index.html 的
+    // 卡片点击挂在 document 冒泡阶段，同层同阶段时谁先跑由注册顺序决定，
+    // 靠顺序太脆；捕获必然先于冒泡，与注册顺序无关。
+    document.addEventListener('click', function (e) {
+      if (!draggedAt || Date.now() - draggedAt > 400) return;
+      draggedAt = 0;
+      e.stopPropagation();
+      e.preventDefault();
+    }, true);
+
+    // 原生滚动（触摸端）也要更新渐隐。scroll 事件不冒泡，但**捕获阶段**能拿到，
+    // 所以在 document 上捕获。缺这一条的话：手指滑到最右，`at-end` 不会被置上，
+    // 右边缘渐隐一直挂着——最后一个标签看着像被切掉了，而它其实是完整的。
+    document.addEventListener('scroll', function (e) {
+      var t = e.target;
+      if (t && t.classList && t.classList.contains('ctags')) syncTags(t);
+    }, true);
+
+    // 换列数/转屏之后「能不能滚」会变，重算一次
+    global.addEventListener('resize', function () { refreshTagScroll(document); });
+
+    if (global.MutationObserver) {
+      new MutationObserver(function (recs) {
+        for (var i = 0; i < recs.length; i++) {
+          var added = recs[i].addedNodes;
+          for (var j = 0; j < added.length; j++) {
+            var n = added[j];
+            if (n.nodeType !== 1) continue;
+            if (n.classList && n.classList.contains('ctags')) syncTags(n);
+            else refreshTagScroll(n);
+          }
+        }
+      }).observe(document.body, { childList: true, subtree: true });
+    }
   }
 
   /* ---------- 检索 ---------- */
@@ -290,6 +402,7 @@
     matches: matches,
     wireFilterToggle: wireFilterToggle,
     setFiltCount: setFiltCount,
+    refreshTagScroll: refreshTagScroll,
     emptyHtml: emptyHtml,
     countText: countText
   };
