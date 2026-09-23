@@ -173,6 +173,17 @@
   transition:transform .34s cubic-bezier(.22,.61,.36,1),opacity .34s ease;
 }
 .deckcards.dragging .d-card{transition:none}
+/* 拖动/惯性滑行期间临时「降维」：把 3D 舞台压平成 2D。牌堆在跟手与惯性里
+   99% 的时间都是「正面朝前、纯 translateX+scale 平移」，根本用不到 preserve-3d；
+   但每张卡都挂着 perspective:1400px + .dc-flip 的 preserve-3d + 两个
+   backface-visibility 面，9 张卡就是 9 个 3D 合成层树。iOS Safari 在每帧重写
+   这 9 个 transform 时要重新光栅化整套 3D 层树（还要叠加封面大图），帧率掉下来
+   就是用户真机报的「滑动不够流畅」。拖动中翻面已被强制复位到正面（见
+   projects.js 的 onMove：位移一过 MOVED_PX 就 setFlipped(false, true)），所以
+   拖动期间关掉 3D 是安全的——翻面只发生在静止态，那时 dragging 已摘、3D 恢复。
+   压平后 iOS 走纯 2D 合成层，比 3D 层树快一个数量级。 */
+.deckcards.dragging .d-card{perspective:none}
+.deckcards.dragging .dc-flip{transform-style:flat}
 /* 回收节点时必须瞬移：它从牌堆一端绕到另一端，若走过渡会「飞过去」。
    因为它在那两端的透明度是 0，理论上看不见，但宁可显式关掉。
    翻转过渡要一起关：被回收的节点可能停在背面，不关就会看到它边飞边翻。 */
