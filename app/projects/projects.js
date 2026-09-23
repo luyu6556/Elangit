@@ -663,13 +663,14 @@
   //                    0.997 ≈ 每秒衰减到 0.997^1000 ≈ 5%，一次快甩约滑 2~4 格后停。
   //   INERTIA_STOP  —— 速度降到这个值（px/ms）以下就结束滑行，snap 回整格。
   var INERTIA_MIN = 0.3;
-  var INERTIA_FRICT = 0.997;
+  var INERTIA_FRICT = 0.995;
   var INERTIA_STOP = 0.05;
   // 初速度上限（px/ms）。速度采样是「位移÷帧间隔」，帧间隔很短时会算出一个
   // 离谱的瞬时速度（触控板一条大 deltaX、dt 只有十几毫秒），不封顶的话一次
-  // 手势能滑飞十几张。2.0 px/ms ≈ 2 屏/秒的甩动，已经到「快甩」的极限，再快
-  // 也按这个算，保证滑行距离有上界。
-  var INERTIA_VMAX = 2.0;
+  // 手势能滑飞十几张。1.0 px/ms ≈ 1 屏/秒，配上 INERTIA_FRICT=0.995 一次快甩
+  // 约滑 2~4 张就停——这是「流畅但别一下冲到底」的上限（旧 2.0 会一次甩十几张，
+  // 用户真机报「翻卡片速度太快」）。
+  var INERTIA_VMAX = 1.0;
   // 设计说明总结的标签行。与 ai.js 的 DIGEST_LABELS、item.html 的 DIGEST_LINE
   // 是同一条约定（「理念/做法/效果」三项）；这里再写一份是因为 deck 页不加载
   // item.html 的内联脚本。容错规则同 item.html：认得出标签就加粗，
@@ -1061,6 +1062,8 @@
       if (a > INERTIA_VMAX) a = INERTIA_VMAX;
       d.inertia = { v: a, s: s, t: 0, raf: 0 };
       var step = d.geom.step;
+      // 滑行全程关过渡（卡片位置每帧由 layout 直写，关掉 .34s 过渡才跟手连续）。
+      cardsBox.classList.add('dragging');
       function frame(ts) {
         var it = d.inertia;
         if (!it) return;                     // 已被打断
@@ -1073,26 +1076,59 @@
         var pages = Math.trunc(d.dragX / step);
         if (pages !== 0) {
           var ni = d.index - pages;         // dragX<0（向左滑）→ pages<0 → index 变大
-          if (ni < 0) ni = 0;
-          if (ni > d.queue.length - 1) ni = d.queue.length - 1;
+          var clamped = false;
+          if (ni < 0) { ni = 0; clamped = true; }
+          if (ni > d.queue.length - 1) { ni = d.queue.length - 1; clamped = true; }
           if (ni !== d.index) {
             d.dragX -= (d.index - ni) * step;  // 只消费真正翻过去的格数
             d.index = ni;
             syncNodes(); paint(); ensureThumbs();
-          } else {
-            d.dragX = 0;                       // 到头了，余量清零
+          } else if (clamped) {
+            // 已经滑到队尾（第一张或最后一张），再没有更多可翻：清余量并立即收尾。
+            // 旧版这里 d.dragX=0 后继续循环，it.v 仍 > STOP 每帧又 += dx 又 clamp 回 0，
+            // dragX 在 0 附近高频振荡，卡片在最后一张上反复抽动。
+            d.dragX = 0;
+            finishInertia();
+            return;
           }
         }
-        cardsBox.classList.add('dragging');    // 滑行中关过渡，位移才连续
         layout();
         it.raf = global.requestAnimationFrame(frame);
       }
+      // 收尾：就近吸附，瞬时（noanim）。**不能走 rebind()**——rebind 会移除
+      // .dragging 恢复 .34s 过渡，把「滑到两张中间的小数余量」慢慢弹回，真机看
+      // 到的就是「卡片抽一下、像跳回前一张」。吸附必须在关过渡的状态下瞬时落位。
       function finishInertia() {
-        d.inertia = null;
-        // 不足一格的余量回弹到整格（与拖拽 / 滚轮的收尾同一个 rebind）。
-        rebind();
+        if (d.inertia) {
+          var r = d.inertia.raf;
+          if (r) global.cancelAnimationFrame(r);
+          d.inertia = null;
+        }
+        snap();
       }
       d.inertia.raf = global.requestAnimationFrame(frame);
+    }
+    // 惯性收尾的「就近吸附」：余量过半就顺方向补完一格（翻一张），不足半格就
+    // 回到当前格。与拖拽/滚轮的收尾共用一个方向语义，但这里是**瞬时**的。
+    // 注意：只清余量、改 index，最后 layout 时仍在 .dragging（关过渡）状态下，
+    // 落位是瞬时的，之后调用方（如 wheelEnd）会各自恢复过渡。
+    function snap() {
+      var step = d.geom.step;
+      var pages = Math.trunc(d.dragX / step);
+      var rem = d.dragX - pages * step;       // 已走满的整格内的小数余量
+      if (Math.abs(rem) >= step * .5) pages += (rem < 0 ? -1 : 1);  // 过半补一格
+      if (pages !== 0) {
+        var ni = d.index - pages;
+        if (ni < 0) ni = 0;
+        if (ni > d.queue.length - 1) ni = d.queue.length - 1;
+        if (ni !== d.index) {
+          d.index = ni;
+          syncNodes(); paint(); ensureThumbs();
+        }
+      }
+      d.dragX = 0;
+      cardsBox.classList.remove('dragging');
+      layout();
     }
 
     /* ---------- 跟手拖拽 ---------- */
