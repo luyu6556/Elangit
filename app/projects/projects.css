@@ -289,6 +289,11 @@
 .deckfoot .btn.sm:hover{background:#fff;border-color:var(--ink-3);opacity:1}
 .deckfoot .btn.sm:disabled{opacity:.35}
 
+/* 首页的翻页是主操作，不能和普通页面里的小型按钮混成同一层级。 */
+.deck-stage-home .deckfoot .btn.sm{
+  height:40px;padding:0 16px;font-size:13.5px;border-radius:9px;
+}
+
 /* 牌堆下方的补充说明（例如「库里只有这 1 条符合当前筛选」）。空的时候
    这一行不占高度，所以不留 margin。 */
 .decknotes{font-size:11.5px;color:var(--ink-3);text-align:center;margin-top:10px;min-height:1px;line-height:1.6}
@@ -327,6 +332,14 @@
     --deck-cw:300px;--deck-ch:420px;--deck-th:190px;
     --deck-step:44px;--deck-shrink:.22;--deck-fade:.24;
   }
+  .deck-stage-home .deckfoot .btn.sm{height:46px;padding:0 19px;font-size:14px}
+
+  /* 手机翻阅页锁住页面本身的纵向位移：横滑时手指不可避免会带一点上下分量，
+     若整页能滚，牌堆会被拖离手指。卡片背面自己的 .dc-dg 仍保留 overflow-y:auto，
+     所以长设计说明并没有失去阅读出口。这个类只由 initDeck() 加在翻阅宿主上。 */
+  body.deck-mobile-lock{height:100dvh;overflow:hidden;overscroll-behavior:none}
+  body.deck-mobile-lock .deck-page{height:calc(100dvh - 58px);min-height:0;overflow:hidden}
+  body.deck-mobile-lock .deck-stage{min-height:0}
 }
 /* ≤360：窄机型（320/360 宽的安卓、iPhone SE 一代）单独一档。必须单独给，因为
    deckbox 只有「屏宽 − 24」，300 的卡在 320 屏上会被裁掉；高度也要收，否则在
@@ -344,4 +357,92 @@
   .proj-head h1{font-size:18px}
   .proj-row{padding:12px 13px;gap:12px}
   .wgrid{grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px}
+}
+
+/* ============================================================
+ * 首页：全库翻阅（根入口 index.html，2026-09-23）
+ * ------------------------------------------------------------
+ * 首页是牌堆的第二个宿主，上面那套 .deck-* 规则**一格都没改**（同一套手感
+ * 只有一份实现，见 projects.js 里 initDeck 的说明）。这一段只放首页独有的
+ * 三件事：底部的素材库入口、选项目浮层、浮层里的项目行。
+ *
+ * 放在本文件而不是首页内联 <style>：首页与项目翻阅页共享同一套牌堆版式
+ * （颜色、圆角、边框都取自 --* 那批变量），拆成两份一定漂移。
+ * ============================================================ */
+
+/* 底部中间的「进入素材库」。与 .deckfoot 分开一行：那一行是牌堆的操作
+   （上一张/进度/下一张），把导航混进去会让「点这里是翻页还是跳走」变糊。 */
+.homefoot{display:flex;justify-content:center;margin-top:14px}
+
+/* 选项目浮层（H0-4：没有当前项目时点爱心必须弹这一层，不得静默收藏）。
+   遮罩点击与 Esc 都能关 —— 关不掉的浮层会把整个首页卡死。
+
+   z-index 必须高于牌堆卡片：layout() 给卡片的层级是 `1000 − 偏移×100`
+   （正中一张 = 1000），而 .deck-page 那几层都是 z-index:auto，**不形成
+   层叠上下文**，所以卡片的 1000 是和本元素在同一个层叠上下文里比的。
+   写 60 的后果实测过一次：浮层在视觉上被卡面盖住，真实鼠标点下去
+   命中的是 .dc-body，按钮完全不响应（JS .click() 却能过 —— 这类
+   「只有真鼠标才复现」的遮挡必须用 elementFromPoint 判，不能只看断言）。 */
+.hsel{
+  position:fixed;inset:0;z-index:1100;display:none;
+  align-items:center;justify-content:center;padding:20px;
+  background:rgba(24,25,27,.32);
+}
+.hsel.on{display:flex}
+.hsel-box{
+  width:min(100%,440px);max-height:min(84vh,640px);overflow-y:auto;
+  background:#fff;border:1px solid var(--line-2);border-radius:var(--r);padding:20px;
+  box-shadow:0 18px 44px rgba(28,34,40,.16);
+}
+.hsel-box h2{font-size:15px;font-weight:500;margin:0 0 6px}
+.hsel-note{font-size:12.5px;color:var(--ink-2);line-height:1.7;margin:0 0 14px}
+.hsel-list,.hsel-arch{display:flex;flex-direction:column;gap:8px}
+.hsel-arch{margin-top:8px}
+.hsel-arch[hidden],.hsel-form[hidden]{display:none}
+.hsel-loading{font-size:12.5px;color:var(--ink-3)}
+.hsel-p{
+  display:flex;align-items:center;gap:10px;width:100%;text-align:left;
+  border:1px solid var(--line-2);border-radius:8px;padding:10px 12px;background:#fff;
+  transition:border-color .12s,background .12s;
+}
+.hsel-p:hover{border-color:var(--ink-3);background:#FCFBFA}
+.hsel-p .pn{
+  flex:1;min-width:0;font-size:13.5px;font-weight:500;line-height:1.4;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+.hsel-p .pc{font-size:11.5px;color:var(--ink-3);flex:none;font-variant-numeric:tabular-nums}
+/* 已归档的行压暗但不隐藏：默认折叠、展开后必须看得出「它已经不在进行中了」。 */
+.hsel-p.is-archived .pn{color:var(--ink-2);font-weight:400}
+.hsel-more{
+  margin-top:10px;font-size:12px;color:var(--ink-2);border:1px solid var(--line-2);
+  border-radius:6px;padding:5px 9px;background:#fff;
+}
+.hsel-more:hover{border-color:var(--ink-3);color:var(--ink)}
+.hsel-split{height:1px;background:var(--line);margin:16px 0 14px}
+.hsel-row{display:flex;align-items:center;gap:10px;justify-content:flex-end;flex-wrap:wrap}
+.hsel-form .inp{margin-bottom:10px}
+
+/* 首页顶栏的窄屏收口。首页顶栏比素材库多两个按钮（各 76px），全称在
+   375px 机型上就溢出 8px、320px 溢出 63px（都在所有者态实测过）——
+   style.css 里那条「≤460 收窄内边距」是按素材库的 4 个文字链接调的，
+   顶不住两个按钮。分两步丢，先丢字数、再丢冗余入口，功能一个不丢。 */
+.hsm{display:none}
+@media (max-width:560px){
+  .hlg{display:none}
+  .hsm{display:inline}
+}
+/* ≤400 再收起顶栏的「素材库」链接：底部中间的「进入素材库」是规格指定的
+   那一个入口，它在任何宽度都还在，所以这里丢掉的只是一个重复入口。
+   320px 实测：不丢它仍溢出 11px。类名带 -home 后缀，别波及其它页面。 */
+@media (max-width:400px){
+  header .hnav-home{display:none}
+}
+/* ≤360 顺手把「进入素材库」这一行收紧。320×568 实测：不收的话页面纵向
+   多出 13px 滚动（牌堆本身不裁，是牌堆下面多了一行）。收紧后回到 0，
+   且 deckbox 仍比卡高 5px，不会开始裁卡（deckbox 是 overflow:hidden）。
+   .deck-stage-home 这个后缀类只挂在首页，项目翻阅页的 padding 不动。 */
+@media (max-width:360px){
+  .homefoot{margin-top:4px}
+  .deck-stage-home{padding-bottom:8px}
+  .deck-stage-home .decknotes{margin-top:6px}
 }

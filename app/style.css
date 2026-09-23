@@ -93,7 +93,7 @@ textarea.inp{resize:vertical;min-height:84px;line-height:1.6}
 .errcard{background:#FBE9E7;border:1px solid #F0C4C0;color:var(--err);font-size:12.5px;border-radius:8px;padding:10px 12px;margin-bottom:12px}
 #toast{
   position:fixed;left:50%;bottom:28px;transform:translateX(-50%) translateY(20px);opacity:0;
-  background:var(--ink);color:#fff;font-size:13px;padding:10px 16px;border-radius:8px;z-index:80;
+  background:var(--ink);color:#fff;font-size:13px;padding:10px 16px;border-radius:8px;z-index:1200;
   transition:.18s;pointer-events:none;max-width:80vw;text-align:center;
 }
 #toast.on{opacity:1;transform:translateX(-50%) translateY(0)}
@@ -158,7 +158,10 @@ textarea.inp{resize:vertical;min-height:84px;line-height:1.6}
    `margin-top:auto` 保留：摘要短的时候标签仍然贴底。 */
 .ctags{display:flex;flex-wrap:nowrap;gap:4px;margin-top:auto;
   min-height:22px;   /* 空标签行也得占满 22px，否则「无标签」那张卡的顶端会偏低 */
-  overflow-x:auto;overflow-y:hidden;scrollbar-width:none;-webkit-overflow-scrolling:touch}
+  overflow-x:auto;overflow-y:hidden;scrollbar-width:none;-webkit-overflow-scrolling:touch;
+  /* 标签是独立横向滚动区：明确把横滑交给它，别让父卡的点击层或浏览器边缘
+     手势抢走。纵向页面滚动仍按原样保留。 */
+  touch-action:pan-x;overscroll-behavior-x:contain}
 .ctags::-webkit-scrollbar{display:none}
 .ctags .chip{padding:4px 7px;font-size:11.5px;flex:none}
 /* 「后面还有标签」的唯一提示是右边缘渐隐，而不是再加一个 +N 小字——
@@ -386,7 +389,8 @@ main.list{flex:1;min-width:0;padding:24px 20px 80px 8px}
 
   /* 标签组各占一行、组内横滑：组数多也不至于把侧栏顶到一屏高 */
   .taggroup .chips{flex-wrap:nowrap;overflow-x:auto;padding-bottom:4px;
-    scrollbar-width:none;-webkit-overflow-scrolling:touch}
+    scrollbar-width:none;-webkit-overflow-scrolling:touch;
+    touch-action:pan-x;overscroll-behavior-x:contain}
   .taggroup .chips::-webkit-scrollbar{display:none}
 }
 

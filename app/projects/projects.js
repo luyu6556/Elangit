@@ -1,9 +1,14 @@
 /* ============================================================
  * Elangit · 项目灵感筛选（一期）页面逻辑
  * ------------------------------------------------------------
- * 三个页面共用这一份脚本（index / workspace / deck），各自只调用自己的
- * init。放一份的理由和 cards.js 一样：项目名归一、标签挑选、素材外观
- * 这些都是**同一条规则**，有两份拷贝就一定会漂移。
+ * 四个页面共用这一份脚本，各自只调用自己的 init：
+ *   app/projects/index.html    → initList()       项目列表
+ *   app/projects/workspace.html→ initWorkspace()  项目工作台
+ *   app/projects/deck.html     → initDeck()       单个项目的快速翻阅
+ *   app/index.html             → initHome()       全库翻阅首页（内部调 initDeck({home:true})）
+ * 放一份的理由和 cards.js 一样：项目名归一、标签挑选、素材外观、牌堆手感
+ * 这些都是**同一条规则**，有两份拷贝就一定会漂移。首页与项目翻阅页只差
+ * 三件事 ——「队列从哪来」「收藏写到哪」「详情链接的 base 与 from」。
  *
  * 三条硬边界（来自 PRD 5.3 与交接单 §5）：
  *   1. 不直接连数据库。所有读写走 Elangit.store，新增写操作自动被 guard() 挡住。
@@ -334,6 +339,85 @@
       return '<div class="chips">' + t.map(function (x) { return C.tagChip(TAX, x, {}); }).join('') + '</div>';
     }
 
+    // Markdown 是下载给项目主人留档的纯文本，不复用 esc()：后者是 HTML
+    // 转义，写进 .md 会把「&」变成肉眼可见的 &amp;。这里仅收平换行，避免
+    // 任一素材的多行字段意外打断标题、列表等 Markdown 结构。
+    function mdLine(value, fallback) {
+      var s = String(value == null ? '' : value).replace(/[\r\n]+/g, ' ').trim();
+      return s || (fallback || '【未填写】');
+    }
+
+    function mdParagraph(value, fallback) {
+      var s = String(value == null ? '' : value).replace(/\r\n?/g, '\n').trim();
+      return s || (fallback || '【未填写】');
+    }
+
+    // `ai_digest` 是已经经过严格契约校验的「理念／做法／效果」三段总结。
+    // 导出时只忠实保留它；为空就写「无」，绝不能回退到摘要、图像描述、原文或备注
+    // 假装存在一段设计说明。给每一行补两个空格，让它稳定属于 Markdown 的同一条目。
+    function mdDigest(value) {
+      var s = String(value == null ? '' : value).replace(/\r\n?/g, '\n').trim();
+      if (!s) return '  无';
+      return s.split('\n').map(function (line) {
+        return '  ' + line.trim();
+      }).filter(function (line) { return line.trim(); }).join('\n') || '  无';
+    }
+
+    function markdownForProject() {
+      var tags = (PROJECT.filter_tags || []).map(function (tag) { return mdLine(tag); });
+      var out = [
+        '# ' + mdLine(PROJECT.name, '未命名项目'),
+        '',
+        '## 项目构思',
+        mdParagraph(PROJECT.brief, '【未填写】'),
+        '',
+        '## 筛选标签',
+        tags.length ? tags.map(function (tag) { return '- ' + tag; }).join('\n') : '【未选择｜快速翻阅默认全库】',
+        '',
+        '## 项目素材集（' + st.items.length + ' 条）'
+      ];
+      if (!st.items.length) {
+        out.push('', '【暂无已收藏素材】');
+        return out.join('\n') + '\n';
+      }
+      st.items.forEach(function (it, index) {
+        var itemTags = [];
+        (it.my_tags || []).concat(it.ai_tags || []).forEach(function (tag) {
+          tag = mdLine(tag, '');
+          if (tag && itemTags.indexOf(tag) < 0) itemTags.push(tag);
+        });
+        out.push(
+          '',
+          '### ' + (index + 1) + '. ' + mdLine(it.ai_title || it.page_title, '未命名素材'),
+          '- 抽屉：' + mdLine(it.category),
+          '- 标签：' + (itemTags.length ? itemTags.join('、') : '【未填写】'),
+          '- 摘要：' + mdLine(it.ai_summary, '无'),
+          '- 设计说明总结：\n' + mdDigest(it.ai_digest),
+          '- 来源：' + mdLine(it.source_platform)
+        );
+        if (it.source_url) out.push('- 原文：' + String(it.source_url).trim());
+      });
+      return out.join('\n') + '\n';
+    }
+
+    function exportMarkdown() {
+      if (!A.isOwner()) { toast('只读浏览：点右上角「解锁编辑」后才能导出'); return; }
+      var safeName = mdLine(PROJECT.name, '未命名项目')
+        .replace(/[\\/:*?"<>|\x00-\x1f]/g, '-').slice(0, 60) || '未命名项目';
+      var blob = new Blob([markdownForProject()], { type: 'text/markdown;charset=utf-8' });
+      var href = URL.createObjectURL(blob);
+      var link = document.createElement('a');
+      link.href = href;
+      link.download = safeName + '-项目素材集.md';
+      link.style.display = 'none';
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      // click 已把 Blob 交给浏览器下载队列；下一轮事件循环后即可释放临时 URL。
+      global.setTimeout(function () { URL.revokeObjectURL(href); }, 0);
+      toast('Markdown 已开始下载');
+    }
+
     function cardActions(it) {
       // 复用 cards.js 的卡片，但操作条换成项目自己的三个动作。
       // 不写第二份卡片解释（PRD 5.2）：信息顺序、标签配色、摘要口径都还是那一份。
@@ -475,6 +559,11 @@
         .map(function (x) { return Number(x.getAttribute('data-id')); });
       if (ids.join(',') === d.order.join(',')) return;
       S.rewriteProjectItemOrder(PID, ids).then(function () {
+        // 导出直接读 st.items。拖拽只会先挪 DOM；写入成功后也要同步这份
+        // 内存顺序，否则用户刚排完就点导出，会得到刷新前的旧排列。
+        st.items.sort(function (a, b2) {
+          return ids.indexOf(a.id) - ids.indexOf(b2.id);
+        });
         toast('顺序已保存');
       }).catch(function (err) {
         toast('排序没存上：' + fmtErr(err));
@@ -495,6 +584,7 @@
       renderEdit();
       if (st.editOpen) { var n = $('pName'); if (n) n.focus(); }
     });
+    $('exportBtn').addEventListener('click', exportMarkdown);
     $('archiveBtn').addEventListener('click', function () {
       archive(PROJECT.status === 'archived');
     });
@@ -573,9 +663,21 @@
     + '<path d="M7 17 17 7M9 7h8v8" stroke="currentColor" stroke-width="1.9"'
     + ' stroke-linecap="round" stroke-linejoin="round"/></svg>';
   var deck = null;         // 牌堆状态（initDeck 里建）
+  // 牌堆有两个宿主（2026-09-23 首页重构加入第二个）：
+  //   · 项目翻阅页 `projects/deck.html?project=N` —— 队列按该项目标签过滤，爱心写进该项目；
+  //   · 应用首页 `index.html` —— 队列是**全库**，爱心写进「当前项目」，没选项目时先弹选择层。
+  // **引擎只有这一份**：拖拽、滚轮连续滚动、翻面、命中分流、节点复用全部不分叉；
+  // 分叉的只有三件事 ——「队列从哪来」「收藏写到哪」「详情链接的 base 与 from」。
+  // 不要为了首页另写第二套（两套一定会在手感和修复上漂移）。
+  var HOME = false;        // 本次装配是不是首页
+  var CUR = null;          // 首页的「当前项目」行（项目翻阅页恒等于 PROJECT）
 
-  function initDeck() {
-    PID = qsNum('project', 0);
+  function initDeck(opts) {
+    var o = opts || {};
+    HOME = !!o.home;
+    PID = HOME ? 0 : qsNum('project', 0);
+    // 详情页 / 录入页相对本页的路径前缀：项目翻阅页在 projects/ 下一层，首页在根。
+    var BASE = HOME ? '' : '../';
     var cardsBox = $('cards');
     var d = {
       queue: [], index: 0, dragX: 0, dragging: false, vel: 0,
@@ -584,6 +686,16 @@
       geom: { cw: 336, step: 82, shrink: .055, fade: .15 }
     };
     deck = d;
+
+    // 手机翻阅页是一个完整舞台，不应让页面本身跟着上下走：用户横滑时只需
+    // 面对牌堆，纵向的轻微抖动不能把整页带离卡片。背面的长总结仍在自己的
+    // .dc-dg 内滚动；桌面或转到宽屏时立刻撤销锁定，不影响其它页面。
+    function syncMobileDeckLock() {
+      var locked = global.innerWidth <= 640;
+      document.body.classList.toggle('deck-mobile-lock', locked);
+    }
+    syncMobileDeckLock();
+    global.addEventListener('resize', syncMobileDeckLock);
 
     /* ---------- 几何：参数在 CSS，算在这里 ---------- */
     function readGeom() {
@@ -851,6 +963,12 @@
     }
 
     function syncHearts() {
+      // 文案必须说真话：首页可能还没有「当前项目」，那时点下去是弹选择层，
+      // 不是「收藏到本项目」。同一个词在两处指不同的东西，是最难查的一类错
+      // （用户按字面理解去点，得到的却是另一个行为）。
+      var to = HOME
+        ? (CUR ? '收藏到「' + (CUR.name || '未命名项目') + '」' : '收藏到项目…')
+        : '收藏到本项目';
       d.nodes.forEach(function (n) {
         if (!n.itemId) return;
         var h = n.el.querySelector('.dc-heart');
@@ -858,8 +976,8 @@
         var on = !!d.collected[n.itemId];
         h.classList.toggle('on', on);
         h.setAttribute('aria-pressed', on ? 'true' : 'false');
-        h.setAttribute('aria-label', on ? '取消收藏' : '收藏到本项目');
-        h.title = on ? '已收藏 · 再点取消' : '收藏到本项目';
+        h.setAttribute('aria-label', on ? '取消收藏' : to);
+        h.title = on ? '已收藏 · 再点取消' : to;
       });
     }
 
@@ -901,13 +1019,15 @@
     /* ---------- 跟手拖拽 ---------- */
     var pid = null, startX = 0, lastX = 0, lastT = 0;
 
-    // 阻尼曲线：|dx| ≤ free 时 1:1 跟手；超出部分乘 k 继续跟；总位移封顶 cap。
-    // 两个分段在 free 处连续，所以从"跟手"过渡到"阻尼"不会跳一下。
-    function rubber(dx, free, k, cap) {
+    // 阻尼曲线：|dx| ≤ free 时 1:1 跟手；之后以指数曲线逐步减速，趋近 limit。
+    // 旧版是硬截到 cap，手指还在走、牌却在同一位置顶死；这里不在任何一个
+    // 像素点骤停，越拖越慢、最后自然靠近边界，手机长滑才会像翻页而非撞墙。
+    function rubber(dx, free, k, limit) {
       var s = dx < 0 ? -1 : 1;
       var a = Math.abs(dx);
       if (a <= free) return dx;
-      return s * (free + Math.min((a - free) * k, cap - free));
+      var range = Math.max(limit - free, 1);
+      return s * (free + range * (1 - Math.exp(-((a - free) * k) / range)));
     }
 
     function onDown(e) {
@@ -933,9 +1053,10 @@
       if (dt >= 8) { d.vel = (e.clientX - lastX) / dt; lastX = e.clientX; lastT = now; }
       // 位移不再硬截。原来截在 step×1.15 —— 手机档（step 44）就只有 52.9px，手指
       // 横移 5 毫米左右卡片就顶住不动了，用户真机实测的评价是「手感很钝」。
-      // 现在改成：一格之内 1:1 跟手，超出一格按 0.4 继续跟，两格封顶。
-      // 手上始终有反馈，同时仍然兜住原来那个「别让卡片被甩出屏幕」的意图。
-      d.dragX = rubber(e.clientX - startX, d.geom.step, .4, d.geom.step * 2);
+      // 现在改成：一格之内 1:1 跟手，超出后渐进减速并自然趋近三格距离。
+      // 没有硬封顶，因此长滑不会在某个位置突然卡住；但阻尼仍会兜住「别把牌
+      // 堆甩出屏幕」的边界。
+      d.dragX = rubber(e.clientX - startX, d.geom.step, .4, d.geom.step * 3);
       // 位移一过 MOVED_PX 就确定「这是在拖，不是点」。此刻把翻面复位（瞬时），
       // 于是「先复位再翻页」天然成立：复位发生在判定翻页之前，而且拖动全程
       // 看到的都是正面。代价是「翻面状态下轻碰一下也会回到正面」——但 MOVED_PX
@@ -1047,11 +1168,14 @@
       wheelTimer = setTimeout(wheelEnd, WHEEL_IDLE);
     }, { passive: false });
 
-    // 详情页认这三个参数：回到同一个项目、同一张卡（P2-6）。
+    // 详情页认这几个参数：回到同一个宿主、同一张卡（P2-6）。
+    // 首页与项目翻阅页的差别只有「from 是谁」和「带不带 pid」：项目页带 pid
+    // （回该项目），首页不带（全局牌堆与项目无关）。
     function openDetail(card) {
       var id = Number(card.getAttribute('data-item'));
       if (!id) return;
-      global.location.href = '../item.html?id=' + id + '&from=deck&pid=' + PID + '&i=' + d.index;
+      var q = HOME ? '&from=home' : '&from=deck&pid=' + PID;
+      global.location.href = BASE + 'item.html?id=' + id + q + '&i=' + d.index;
     }
 
     // 节点 → 队列序号。牌的 DOM 会被回收复用，所以按「哪个节点」反查，别按 data-item。
@@ -1095,12 +1219,24 @@
     // 唯一约束（DATABASE_23505）。所以同一个 itemId 只允许一个写入在飞，
     // 期间按钮 disabled。23505 若还是发生了（本地已收藏状态过期），把它
     // 当成「其实已经收藏了」处理，重新同步而不是报错。
+    // 收藏写进哪个项目：项目翻阅页恒为 PROJECT；首页是用户选的「当前项目」。
+    // 首页还没选项目时**不得静默收藏**（H0-4）—— 把选择权交回去（弹层），
+    // 用户选完/建完再回来重放这一下点击。
+    function heartTarget() { return HOME ? CUR : PROJECT; }
+
     function toggleHeart(btn) {
       var card = btn.closest('.d-card');
       var id = card && Number(card.getAttribute('data-item'));
       if (!id) return;
       if (!A.isOwner()) { toast('只读浏览：点右上角「解锁编辑」后才能收藏'); return; }
       if (d.inflight[id]) return;
+
+      var T = heartTarget();
+      if (!T) {
+        if (o.onNeedProject) o.onNeedProject(id);
+        else toast('先选一个项目，才能把这条收进去');
+        return;
+      }
 
       var was = !!d.collected[id];
       d.inflight[id] = 1;
@@ -1113,9 +1249,9 @@
       btn.classList.remove('pop');
       void btn.offsetWidth;
       btn.classList.add('pop');
-      toast(was ? '已取消收藏' : '已收藏到「' + (PROJECT.name || '未命名项目') + '」');
+      toast(was ? '已取消收藏' : '已收藏到「' + (T.name || '未命名项目') + '」');
 
-      var p = was ? S.removeProjectItem(PID, id) : S.saveProjectItem(PID, id);
+      var p = was ? S.removeProjectItem(T.id, id) : S.saveProjectItem(T.id, id);
       p.then(function () {
         if (was) {
           var k = d.order.indexOf(id);
@@ -1145,6 +1281,14 @@
       $('cards').style.display = 'none';
       $('deckfoot').style.display = 'none';
       box.style.display = '';
+      // 首页的牌堆就是全库、不过任何标签，所以「翻不出东西」只有一种原因：
+      // 素材库本身是空的。这里没有工作台可回，也不该提「改筛选标签」——
+      // 首页压根没有标签这回事，提了就是引导用户去找一个不存在的入口。
+      if (HOME) {
+        box.innerHTML = '<b>素材库还是空的</b>先收几条素材进来，这里才有得翻。'
+          + '<div class="fthex"><a class="btn sm" href="' + BASE + 'add.html">收进一条灵感</a></div>';
+        return;
+      }
       var tags = (PROJECT.filter_tags || []);
       if (!d.index0count) {
         box.innerHTML = '<b>灵感库还是空的</b>先收几条素材进来，这里才有得翻。'
@@ -1162,7 +1306,174 @@
       }
     }
 
+    /* ---------- 头部：两种宿主唯一的差别集中在 applyHeader 里 ---------- */
+    function applyHeader() {
+      var P = HOME ? CUR : PROJECT;
+      if (HOME && !P) {
+        // 首页还没选「当前项目」。这几行不是装饰：此时爱心写不出去（H0-4），
+        // 头部必须明说「未选择项目」，而不是借一个空名字假装有项目。
+        $('dname').textContent = '未选择项目';
+        $('dname2').textContent = '未选择项目';
+        $('dname2').setAttribute('href', 'projects/index.html');
+        $('hdrNote').textContent = '全库翻阅';
+        $('dbrief').innerHTML = '<span class="empty">首页翻的是整个素材库。'
+          + '点右下角爱心时会先让你选一个项目，之后的收藏就写进它。</span>';
+        $('dtags').innerHTML = '<div class="picknone">还没选项目 · 点爱心时再选</div>';
+        document.title = 'Elangit · 全库翻阅';
+        return;
+      }
+      var name = (P && P.name) || '未命名项目';
+      $('dname').textContent = name;
+      $('dname2').textContent = name;
+      if (HOME) {
+        // 「当前项目」是首页的**临时**状态（不跨刷新，与 P2-9 同一条精神），
+        // 它只活在这一次浏览里，所以这里不指向任何「正在看某个项目」的页面。
+        $('dname2').setAttribute('href', 'projects/index.html');
+      } else {
+        $('dname2').setAttribute('href', 'workspace.html?project=' + PID);
+      }
+      $('hdrNote').textContent = name;
+      $('dbrief').innerHTML = P.brief
+        ? esc(P.brief) : '<span class="empty">还没有写构思。</span>';
+      var tags = P.filter_tags || [];
+      var chips = tags.length
+        ? '<div class="chips">' + tags.map(function (t) { return C.tagChip(TAX, t, {}); }).join('') + '</div>'
+        : '';
+      if (HOME) {
+        $('dtags').innerHTML = '<div class="picknone">收藏会写进「' + esc(name)
+          + '」；首页翻的是全库，不按标签筛。</div>' + chips;
+        document.title = 'Elangit · 全库翻阅';
+      } else {
+        $('dtags').innerHTML = chips || '<div class="picknone">没有选标签 · 翻阅全库</div>';
+        document.title = name + ' · 快速翻阅 · Elangit';
+      }
+    }
+
+    /* ---------- 首页专用：选 / 换 / 清空「当前项目」 ---------- */
+    // cur=null 表示回到「未选择项目」。项目翻阅页调用它是空操作（返回已决 Promise）。
+    function setCurrentProject(cur) {
+      if (!HOME) return Promise.resolve(null);
+      CUR = cur || null;
+      d.curId = CUR ? CUR.id : 0;
+      applyHeader();
+      if (!CUR) {
+        d.order = [];
+        d.collected = {};
+        syncHearts(); paint();
+        return Promise.resolve(null);
+      }
+      // 换了收藏目标，爱心状态必须整套跟着换。否则在 A 项目里收藏过的素材切到 B
+      // 之后还亮着，而 B 里其实没有它 —— 用户一点反而收到「早就收藏过了」。
+      return S.listProjectItems(CUR.id).then(function (links) {
+        d.order = (links || []).map(function (l) { return l.item_id; })
+          .filter(function (id) { return !!d.index0[id]; });
+        d.collected = {};
+        d.order.forEach(function (id) { d.collected[id] = true; });
+        syncHearts(); paint();
+        return CUR;
+      }).catch(function (e) {
+        // 读不到就按「一条都没收」继续走，但要说出来：空着爱心与「本就没收藏」
+        // 在界面上长得一样，不说就没法区分（同 ai_digest 那条原则）。
+        d.order = [];
+        d.collected = {};
+        syncHearts(); paint();
+        toast('读「' + (CUR.name || '未命名项目') + '」已收藏失败：' + fmtErr(e));
+        return CUR;
+      });
+    }
+
+    // 选择层选完项目后「重放那一下点击」。不合成 DOM 事件：直接走同一条写入
+    // 路径（toggleHeart），否则「点爱心」这件事就有了两个入口，改一处必漏另一处。
+    // 但语义是**保证收藏**，不是「翻转收藏状态」：弹层之前那一下点击发生时还没有
+    // 当前项目，爱心必然是空心，用户的意思只有一个 —— 把这条收进去。若选中的项目
+    // 里本来就有它，setCurrentProject 已经把它标成已收藏，这时再走 toggleHeart 就
+    // 成了**取消收藏**：用户想收藏，结果东西被删出项目（验证台第一遍跑出来就是
+    // 「3 → 2」）。所以先看已收藏就收手，并把「本来就有」说出来 —— 空着爱心与
+    // 「本就没收藏」长得一样，不说用户分不清。
+    function collectItem(id) {
+      var n = null;
+      for (var i = 0; i < d.nodes.length; i++) {
+        if (d.nodes[i].itemId === id) { n = d.nodes[i]; break; }
+      }
+      if (!n) { toast('这一张已经翻过去了，滚回它再点爱心'); return; }
+      if (d.collected[id]) {
+        toast('「' + ((CUR && CUR.name) || '未命名项目') + '」里本来就有这一条');
+        return;
+      }
+      var h = n.el.querySelector('.dc-heart');
+      if (h) toggleHeart(h);
+    }
+
+    function getCurrentProject() { return CUR; }
+
+    // 首页要用的三个入口挂到 deck 上：initDeck 的闭包在它返回之后依然活着，
+    // 但模块级只能通过 deck 这个引用摸进去（deck 是 initDeck 里建的）。
+    // 同时把 home / curId 记在 deck 上，验证台的 __deck() 才看得到。
+    d.home = HOME;
+    d.curId = 0;
+    d.api = {
+      setCurrentProject: setCurrentProject,
+      collectItem: collectItem,
+      getCurrentProject: getCurrentProject
+    };
+
+    /* ---------- 首帧装配：建九张卡并摆好 ---------- */
+    // 两个宿主共用。里面藏着「收口必须同步」那个坑（见下方注释），抄第二份
+    // 就等于给这个坑留第二个入口。
+    function mountCards() {
+      d.nodes = [];
+      cardsBox.innerHTML = '';
+      // 首次装配不配音效：卡的 CSS 默认 transform 是 none，而 layout() 会把它设成
+      // translateX(calc(-50% + 0px))。若不禁用过渡，整叠牌会从「右偏半张卡宽」
+      // （336/2=168px）在 .34s 里滑到居中——每次进翻阅页、含从详情页返回，都会
+      // 滑一次。PRD 只要求拖拽/回弹/翻页有过渡，没有入场动效，这一滑是意外产物。
+      cardsBox.classList.add('booting');
+      for (var k = -BAND; k <= BAND; k++) {
+        var el = document.createElement('div');
+        el.className = 'd-card';
+        cardsBox.appendChild(el);
+        d.nodes.push({ el: el, qi: k, itemId: 0, key: '', btns: [] });
+      }
+      readGeom();
+      // syncHearts 必须在这里跟着 syncNodes 一起跑：syncNodes 刚给每张牌定下
+      // itemId，而 deckCardHtml 生成时写死的 title 是「收藏到本项目」—— 首页
+      // 压根没有「本项目」。等缩略图回来才刷（原来只挂在 ensureThumbs 里）
+      // 会让首帧到那一刻之间，爱心的提示与 aria-label 都是错的
+      // （实测：那句话说了 0.2~0.8 秒，屏幕阅读器念到的就是它）。
+      syncNodes(); layout(); syncHearts(); paint(); ensureThumbs();
+      // 收口必须是**同步**的，不能等下一帧再摘类。原因：readGeom() 里的
+      // getComputedStyle 已经强制过一次样式解析，那一次卡上的 transform 还是
+      // none；若此刻仍带着过渡属性，后面任何一次重算都会把「none → 目标值」
+      // 判成一次变更并打上 .34s 过渡（实测能只减半偏移，消不掉）。
+      // 这里主动逼一次同步解析：让最终 transform 在过渡被禁用的状态下就被采纳，
+      // 之后再摘类只是改 transition 属性、transform 不变，不会触发过渡。
+      void cardsBox.offsetHeight;
+      cardsBox.classList.remove('booting');
+      $('deckNotes').textContent = d.queue.length === 1
+        ? (HOME ? '素材库里只有这 1 条。' : '库里只有这 1 条符合当前筛选。') : '';
+    }
+
     function boot() {
+      // 首页：牌堆 = 全库，这一步不碰 projects / project_items（收藏态要等用户
+      // 选了「当前项目」才去读，见 setCurrentProject）。
+      if (HOME) {
+        return Promise.all([S.loadTaxonomy(), S.loadIndex()]).then(function (r) {
+          TAX = r[0];
+          var all = r[1] || [];
+          d.index0count = all.length;
+          d.index0 = {};
+          all.forEach(function (it) { d.index0[it.id] = it; });
+          d.queue = all;          // 首页不过滤标签：先看见整个库有什么
+          d.order = [];
+          d.collected = {};
+          // 进度不落库（P2-9）：只有「从详情页返回」会带上 i，其余一律从 0 开始。
+          var wantH = qsNum('i', 0);
+          d.index = Math.min(Math.max(0, wantH), Math.max(0, d.queue.length - 1));
+          applyHeader();
+          if (!d.queue.length) { emptyState(); return; }
+          mountCards();
+        });
+      }
       if (!PID) {
         return Promise.reject(new Error(
           '地址里没有项目编号（应该形如 deck.html?project=1）。从项目列表或工作台点进来。'));
@@ -1191,44 +1502,12 @@
           var want = qsNum('i', 0);
           d.index = Math.min(Math.max(0, want), Math.max(0, d.queue.length - 1));
 
-          $('dname').textContent = PROJECT.name || '未命名项目';
-          $('dname2').textContent = PROJECT.name || '未命名项目';
-          $('dname2').setAttribute('href', 'workspace.html?project=' + PID);
-          $('hdrNote').textContent = PROJECT.name || '未命名项目';
-          $('dbrief').innerHTML = PROJECT.brief
-            ? esc(PROJECT.brief) : '<span class="empty">还没有写构思。</span>';
-          $('dtags').innerHTML = tags.length
-            ? '<div class="chips">' + tags.map(function (t) { return C.tagChip(TAX, t, {}); }).join('') + '</div>'
-            : '<div class="picknone">没有选标签 · 翻阅全库</div>';
-          document.title = (PROJECT.name || '未命名项目') + ' · 快速翻阅 · Elangit';
+          // 头部（项目名 / 构思 / 标签 / 标题）统一交给 applyHeader：
+          // 首页选「当前项目」之后要重画同一批元素，写两份一定漂移。
+          applyHeader();
 
           if (!d.queue.length) { emptyState(); return; }
-
-          d.nodes = [];
-          cardsBox.innerHTML = '';
-          // 首次装配不配音效：卡的 CSS 默认 transform 是 none，而 layout() 会把它设成
-          // translateX(calc(-50% + 0px))。若不禁用过渡，整叠牌会从「右偏半张卡宽」
-          // （336/2=168px）在 .34s 里滑到居中——每次进翻阅页、含从详情页返回，都会
-          // 滑一次。PRD 只要求拖拽/回弹/翻页有过渡，没有入场动效，这一滑是意外产物。
-          cardsBox.classList.add('booting');
-          for (var k = -BAND; k <= BAND; k++) {
-            var el = document.createElement('div');
-            el.className = 'd-card';
-            cardsBox.appendChild(el);
-            d.nodes.push({ el: el, qi: k, itemId: 0, key: '', btns: [] });
-          }
-          readGeom();
-          syncNodes(); layout(); paint(); ensureThumbs();
-          // 收口必须是**同步**的，不能等下一帧再摘类。原因：readGeom() 里的
-          // getComputedStyle 已经强制过一次样式解析，那一次卡上的 transform 还是
-          // none；若此刻仍带着过渡属性，后面任何一次重算都会把「none → 目标值」
-          // 判成一次变更并打上 .34s 过渡（实测能只减半偏移，消不掉）。
-          // 这里主动逼一次同步解析：让最终 transform 在过渡被禁用的状态下就被采纳，
-          // 之后再摘类只是改 transition 属性、transform 不变，不会触发过渡。
-          void cardsBox.offsetHeight;
-          cardsBox.classList.remove('booting');
-          $('deckNotes').textContent = d.queue.length === 1
-            ? '库里只有这 1 条符合当前筛选。' : '';
+          mountCards();
         });
     }
 
@@ -1256,9 +1535,188 @@
     OB.mount();
     boot().catch(function (e) {
       $('deErr').style.display = '';
-      $('deErr').textContent = '读项目失败：' + fmtErr(e);
+      $('deErr').textContent = (HOME ? '读素材库失败：' : '读项目失败：') + fmtErr(e);
       $('cards').style.display = 'none';
       $('deckfoot').style.display = 'none';
+    });
+  }
+
+  /* ============================================================
+   * 五、首页 · 全库翻阅的非牌堆部分（根入口 index.html）
+   * ------------------------------------------------------------
+   * 牌堆本身在 initDeck({home:true}) 里装配（第四个宿主参数），这里只做
+   * 首页独有的两件事：顶栏两个动作（新建项目 / 添加素材是纯链接）与
+   * 「收藏到哪个项目」浮层。
+   *
+   * 浮层为什么必须存在（H0-4）：首页没有天然的项目上下文，爱心写不出去。
+   * 静默收进「某个默认项目」是这里最坏的做法 —— 用户以为只是收藏，
+   * 实际把素材塞进了上一次碰过的项目里，而且要翻到那个项目才发现。
+   * 所以没有当前项目时不写库，先把选择权交回用户。
+   * ============================================================ */
+
+  function initHome() {
+    // 通过对外对象拿 initDeck / setCurrentProject / collectItem：它们定义在
+    // 本文件里，但 initDeck 的那几个入口活在 initDeck 的闭包里，只有这一条路。
+    // 调用时对象已建好（initHome 由页面在脚本末尾调用），所以这里是安全的。
+    var API = global.Elangit.projects;
+
+    var picker = $('picker'), pList = $('pList'), pArch = $('pArch'), pMore = $('pMore'),
+        pForm = $('pForm'), pNewRow = $('pNewRow'), pName = $('pName'), pNote = $('pNote');
+
+    var pending = 0;     // 这次打开浮层是为了收藏哪一条（0 = 只是新建 / 切换项目）
+    var rows = [];       // 最近一次读到的项目行
+    var counts = {};     // 每个项目的已收藏数
+    var archOpen = false;
+    var busy = false;
+
+    function isOwner() { return A.isOwner(); }
+
+    function rowHtml(p) {
+      var n = counts[p.id];
+      var cnt = n == null ? '收藏数读不到' : '已收藏 ' + n + ' 条';
+      return '<button class="hsel-p' + (p.status === 'archived' ? ' is-archived' : '') + '"'
+        + ' type="button" data-pid="' + p.id + '">'
+        + '<span class="pn">' + esc(p.name || '未命名项目') + '</span>'
+        + statusBadge(p)
+        + '<span class="pc">' + cnt + '</span>'
+        + '</button>';
+    }
+
+    function loadProjects() {
+      pList.innerHTML = '<div class="hsel-loading">读取项目…</div>';
+      pArch.innerHTML = '';
+      return S.listProjects().then(function (list) {
+        rows = list || [];
+        // 每个项目的已收藏数：一次一发 listProjectItems。理由与项目列表页一致
+        // （store.js 没有「按项目分组计数」，单用户工具的项目数是个位数）。
+        return Promise.all(rows.map(function (p) {
+          return S.listProjectItems(p.id).then(function (its) {
+            counts[p.id] = (its || []).length;
+          }, function () { counts[p.id] = null; });
+        }));
+      }).then(render).catch(function (e) {
+        pList.innerHTML = '<div class="hsel-loading">读项目失败：' + esc(fmtErr(e)) + '</div>';
+      });
+    }
+
+    function render() {
+      var act = rows.filter(function (p) { return p.status !== 'archived'; });
+      var arch = rows.filter(function (p) { return p.status === 'archived'; });
+      if (!rows.length) {
+        pList.innerHTML = '<div class="hsel-loading">还没有项目。新建一个，'
+          + '把想收的素材往一个方向收一收。</div>';
+      } else if (!act.length) {
+        // 项目全归档了。这时仍然要能选（往归档项目里补素材是合理操作），
+        // 但必须说清楚「进行中的一个都没有」，否则用户会以为列表坏了。
+        pList.innerHTML = '<div class="hsel-loading">进行中的项目一个都没有，'
+          + '已归档的 ' + arch.length + ' 个在下面。</div>';
+      } else {
+        pList.innerHTML = act.map(rowHtml).join('');
+      }
+      if (arch.length) {
+        pMore.hidden = false;
+        pMore.textContent = archOpen
+          ? '收起已归档项目' : '显示已归档项目（' + arch.length + '）';
+        pMore.setAttribute('aria-expanded', archOpen ? 'true' : 'false');
+        pArch.hidden = !archOpen;
+        pArch.innerHTML = archOpen ? arch.map(rowHtml).join('') : '';
+      } else {
+        pMore.hidden = true;
+        pArch.hidden = true;
+        pArch.innerHTML = '';
+      }
+    }
+
+    function openPicker(itemId, withForm) {
+      pending = itemId || 0;
+      archOpen = false;
+      pForm.hidden = !withForm;
+      pNewRow.hidden = !!withForm;
+      pName.value = '';
+      pNote.textContent = pending
+        ? '这一条先没有收藏 —— 因为还没选项目。选一个已有的，或新建一个；'
+          + '选好之后这一条就收进它。'
+        : '选一个项目作为「当前项目」：之后的收藏都写进它。'
+          + '首页翻的仍是整个素材库，不受这个选择影响。';
+      picker.classList.add('on');
+      picker.setAttribute('aria-hidden', 'false');
+      loadProjects();
+    }
+
+    function closePicker() {
+      picker.classList.remove('on');
+      picker.setAttribute('aria-hidden', 'true');
+      pending = 0;
+      busy = false;
+    }
+
+    function choose(pid) {
+      if (busy) return;
+      var p = rows.filter(function (x) { return x.id === pid; })[0];
+      if (!p) return;
+      busy = true;
+      var item = pending;                 // closePicker() 会清掉 pending，先留一份
+      closePicker();
+      API.setCurrentProject(p).then(function () {
+        toast('当前项目：' + (p.name || '未命名项目'));
+        if (item) API.collectItem(item);  // 选完重放那一下爱心（走同一条写入路径）
+      }).catch(function (e) {
+        toast('切换项目失败：' + fmtErr(e));
+      }).then(function () { busy = false; });
+    }
+
+    function create() {
+      if (busy) return;
+      if (!isOwner()) { toast('只读浏览：点右上角「解锁编辑」后才能建项目'); return; }
+      busy = true;
+      var item = pending;
+      // 名称留空的归一化在 store 里（projectPatch → projectName），页面不复刻这份规则。
+      S.createProject({ name: pName.value }).then(function (p) {
+        rows.push(p);
+        counts[p.id] = 0;
+        closePicker();
+        return API.setCurrentProject(p).then(function () {
+          toast('已建立「' + (p.name || '未命名项目') + '」，并且是当前项目');
+          if (item) API.collectItem(item);
+        });
+      }).catch(function (e) {
+        toast('建立失败：' + fmtErr(e));
+      }).then(function () { busy = false; });
+    }
+
+    picker.addEventListener('click', function (e) {
+      if (e.target === picker) { closePicker(); return; }        // 点遮罩 = 关
+      if (e.target.closest('#pMore')) { archOpen = !archOpen; render(); return; }
+      if (e.target.closest('#pNew')) {
+        pForm.hidden = false; pNewRow.hidden = true; pName.focus(); return;
+      }
+      if (e.target.closest('#pCancel')) {
+        pForm.hidden = true; pNewRow.hidden = false; return;
+      }
+      if (e.target.closest('#pGo')) { create(); return; }
+      var p = e.target.closest('[data-pid]');
+      if (p) choose(Number(p.getAttribute('data-pid')));
+    });
+
+    // Esc 关浮层。牌堆那边只管 ← →，两边不冲突。
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape' && picker.classList.contains('on')) closePicker();
+    });
+
+    // 顶栏「新建项目」：打开同一个浮层，但直接展开命名输入 ——
+    // 「新建」和「收藏时新建」共用一套创建逻辑，只差要不要重放那次收藏。
+    $('newBtn').addEventListener('click', function () {
+      if (!isOwner()) { toast('只读浏览：点右上角「解锁编辑」后才能建项目'); return; }
+      openPicker(0, true);
+      pName.focus();
+    });
+    var sw = $('pickBtn'), sw2 = $('pickBtn2');
+    if (sw) sw.addEventListener('click', function () { openPicker(0, false); });
+    if (sw2) sw2.addEventListener('click', function () { openPicker(0, false); });
+
+    API.initDeck({
+      home: true,
+      onNeedProject: function (id) { openPicker(id, false); }
     });
   }
 
@@ -1270,11 +1728,27 @@
     initList: initList,
     initWorkspace: initWorkspace,
     initDeck: initDeck,
-    // 一次性验证台（_verify_projects.html）用的只读探针。只读、不改状态，
-    // 且验证页本身带 _verify_ 前缀，不会进发布件。
+    // 根入口 index.html（全库翻阅首页）。它内部会自己调用 initDeck({home:true})。
+    initHome: initHome,
+    // 首页专用（index.html）。三个都只在 initDeck({home:true}) 之后才有意义：
+    //   setCurrentProject(p) —— 选定 / 切换 / 清空「当前项目」（p 传 null 清空）；
+    //   collectItem(id)      —— 选择层选完项目后重放那一下爱心（走同一条写入路径）；
+    //   getCurrentProject()  —— 读回当前项目行（选择层自己也要知道现在选的是谁）。
+    // 项目翻阅页调用它们全是空操作，不会改行为。
+    setCurrentProject: function (p) {
+      return deck && deck.api ? deck.api.setCurrentProject(p) : Promise.resolve(null);
+    },
+    collectItem: function (id) { if (deck && deck.api) deck.api.collectItem(id); },
+    getCurrentProject: function () { return deck && deck.api ? deck.api.getCurrentProject() : null; },
+    // 一次性验证台（_verify_projects.html / _verify_home_ui.html）用的只读探针。
+    // 只读、不改状态，且验证页本身带 _verify_ 前缀，不会进发布件。
     __deck: function () {
       if (!deck) return null;
       return {
+        // home / cur 是 2026-09-23 首页重构加的：验证台要靠它判「这次装配的
+        // 是哪个宿主」「当前项目是谁」。只增不改，老断言读的字段一律原样保留。
+        home: !!deck.home,
+        cur: deck.curId,
         index: deck.index,
         total: deck.queue.length,
         geom: { cw: deck.geom.cw, step: deck.geom.step, shrink: deck.geom.shrink, fade: deck.geom.fade },

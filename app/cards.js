@@ -284,6 +284,28 @@
     document.addEventListener('pointerup', endDrag);
     document.addEventListener('pointercancel', endDrag);
 
+    // 触摸端横滑由浏览器原生滚动（不能 preventDefault），但仍需标记它是一次
+    // 横向浏览而不是「点卡片」。否则少量机型会在原生滚动结束后补发 click，
+    // 冒泡到素材卡后打开详情，用户感觉成了「一滑标签就触发卡片」。
+    var touch = null;
+    document.addEventListener('pointerdown', function (e) {
+      if (e.pointerType !== 'touch') return;
+      var box = e.target.closest && e.target.closest('.ctags');
+      if (!box || box.scrollWidth - box.clientWidth <= 1) return;
+      touch = { pid: e.pointerId, x: e.clientX, moved: false };
+    });
+    document.addEventListener('pointermove', function (e) {
+      if (!touch || e.pointerId !== touch.pid) return;
+      if (Math.abs(e.clientX - touch.x) >= DRAG_SLOP) touch.moved = true;
+    });
+    function endTouch(e) {
+      if (!touch || e.pointerId !== touch.pid) return;
+      if (touch.moved) draggedAt = Date.now();
+      touch = null;
+    }
+    document.addEventListener('pointerup', endTouch);
+    document.addEventListener('pointercancel', endTouch);
+
     // 捕获阶段拦下拖动之后的那一下 click。用捕获而不是冒泡：index.html 的
     // 卡片点击挂在 document 冒泡阶段，同层同阶段时谁先跑由注册顺序决定，
     // 靠顺序太脆；捕获必然先于冒泡，与注册顺序无关。

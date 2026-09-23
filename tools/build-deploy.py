@@ -31,7 +31,11 @@ SRC_APP = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 DEFAULT_OUT = os.path.expanduser("~/Documents/Elangit-部署")
 
 # 发布件就是 app/ 减去这些（前缀匹配，按路径段判断，子目录里的同类也要挡住）
-EXCLUDE_PREFIX = ("_verify_",)
+# `_demo_` 是 2026-09-23 加的：首页重构的视觉 Demo（`app/_demo_home.html` 与
+# `app/_demo_home_dock.png`）。原来以为「文件名以下划线开头」就会被排除 —— 不是，
+# 这条规则只认字面前缀，实测空跑时这两个文件**确实进了发布件**（封面 2.66MB）。
+# 教训：排除规则只认它写死的那几个前缀，别按「下划线开头」推断。
+EXCLUDE_PREFIX = ("_verify_", "_demo_")
 EXCLUDE_DIR_NAME = ("_verify_shots",)
 
 

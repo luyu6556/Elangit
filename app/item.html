@@ -139,9 +139,9 @@
   <!-- 返回按钮放在顶栏而不是正文顶部：顶栏是 sticky 的，滚到哪儿都在。
        原先只有正文顶部一行灰色小字「← 返回灵感库」，一滚动就出屏幕，
        用户找不着——这是真实反馈，不是设想。 -->
-  <a class="btn ghost sm back" href="index.html" aria-label="回到灵感库">
+  <a class="btn ghost sm back" href="library.html" aria-label="回到素材库">
     <svg class="back-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M12.5 4.5 7 10l5.5 5.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
-    <span class="back-text">回到灵感库</span>
+    <span class="back-text">回到素材库</span>
   </a>
   <nav class="hnav">
     <a href="add.html" class="owner-only">收进灵感</a>
@@ -237,19 +237,36 @@
 
   var id = Number((/[?&]id=(\d+)/.exec(location.search) || [])[1] || 0);
 
-  /* ---------- 来自项目翻阅页的返回上下文（项目灵感筛选一期，P2-6） ----------
-     只做一件事：把顶栏那颗返回按钮指向「回到翻阅」，并把项目与卡位号带回去，
+  /* ---------- 来自翻阅页的返回上下文（项目灵感筛选一期，P2-6） ----------
+     只做一件事：把顶栏那颗返回按钮指向「回到翻阅」，并把卡位号带回去，
      让用户从详情回到同一张牌。**不改详情本身的任何渲染**，也不动原有返回路径
      （不复制第二份详情页）。
-     这三个参数只在从牌堆点进来时才存在；直接开 item.html?id=N 时一切照旧。 */
+     两个来源（2026-09-23 加首页）：
+       · from=deck&pid=N&i=K —— 项目翻阅页，回到那个项目的第 K 张；
+       · from=home&i=K       —— 首页全库翻阅，回到首页牌堆的第 K 张。
+         首页没有项目上下文（翻的是全库），所以这一支不带也不读 pid。
+     这些参数只在从牌堆点进来时才存在；直接开 item.html?id=N 时一切照旧。 */
   var fromDeck = /[?&]from=deck/.test(location.search);
+  var fromHome = /[?&]from=home/.test(location.search);
   var deckPid = Number((/[?&]pid=(\d+)/.exec(location.search) || [])[1] || 0);
   var deckIdx = Number((/[?&]i=(\d+)/.exec(location.search) || [])[1] || 0);
   var deckName = '';
 
   function applyDeckBack() {
-    if (!fromDeck || !deckPid) return;
     var a = document.querySelector('header a.back');
+    // 首页这一支一次写完：它没有项目名要等（见下面启动处那条 fetchProject）。
+    // 面包屑刻意不在这里抢写 —— render() 稍后会用「素材 #id · 标题」覆盖
+    // dCrumb，抢写的唯一结果是闪一下（那是既有实现的次序，不在本轮改动范围）。
+    if (fromHome) {
+      if (a) {
+        a.setAttribute('href', 'index.html?i=' + deckIdx);
+        a.setAttribute('aria-label', '回到首页翻阅');
+        var th = a.querySelector('.back-text');
+        if (th) th.textContent = '回到翻阅';
+      }
+      return;
+    }
+    if (!fromDeck || !deckPid) return;
     if (a) {
       a.setAttribute('href', 'projects/deck.html?project=' + deckPid + '&i=' + deckIdx);
       a.setAttribute('aria-label', '回到项目翻阅');
@@ -1176,7 +1193,10 @@
     var row = document.querySelector('.danger .row');
     row.innerHTML = '<span class="muted">正在删除…</span>';
     S.deleteItem(state.item.id).then(function () {
-      location.href = 'index.html?deleted=' + state.item.id;
+      // 删完回素材库并给一句确认。`deleted=` 的提示处理代码在素材库页里
+      // （原 index.html 的启动段随整体迁移进了 library.html），所以这里必须
+      // 指向 library.html —— 指回 index.html 的话提示会静默丢掉。
+      location.href = 'library.html?deleted=' + state.item.id;
     }).catch(function (e) {
       showErr('删除失败：' + fmtErr(e));
       resetDelete();
@@ -1193,7 +1213,7 @@
   /* ---------- 启动 ---------- */
 
   if (!id) {
-    showErr('网址里没有素材编号（应该形如 item.html?id=12）。返回灵感库点一张卡片进来。');
+    showErr('网址里没有素材编号（应该形如 item.html?id=12）。返回素材库点一张卡片进来。');
   } else {
     // 项目名只用来写面包屑。读不到就不写——不为了一个抬头让整个详情页报错。
     if (fromDeck && deckPid) {
