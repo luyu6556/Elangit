@@ -705,6 +705,13 @@
       // 与拖拽的 d.vel 分开：拖拽里的 vel 是「这一下甩得多快」的瞬时样本，惯性是
       // 松手后由它启动的一段自主滑行。
       inertia: null,
+      // 翻页落定时的「飞入动画」：d.flyDir = ±1 表示新中央卡从下一格（+）/
+      // 上一格（-）位置以偏移 + 缩放 + 旋转飞入中央；=0 时中央卡在标准位置。
+      // 由 playFlyIn 设置、350ms 后清零，期间 layout() 把偏移叠加到中央卡
+      // transform，CSS transition（.34s）把旧 transform 过渡到新 transform。
+      // 只在「真的翻了页」时播，余量回弹（pages=0）不播——否则松手不足半格
+      // 也会飞一下，体验上就成「粘手」。
+      flyDir: 0,
       geom: { cw: 336, step: 82, shrink: .055, fade: .15 }
     };
     deck = d;
@@ -926,15 +933,32 @@
 
     function layout() {
       var v = d.dragX / d.geom.step;
+      // 飞入偏移：playFlyIn 期间，d.flyDir 记录中央卡应该从哪一格「飞过来」。
+      // 叠加在中央卡 transform 上，配合 .34s transition 产生「飞入立体感」。
+      // 注意：rotateY 必须在压平的 3D 上下文里才正确——上一轮 .deckcards.dragging
+      // 的 transform-style:flat 只在拖动中生效，飞入期间 dragging 已摘、3D 已恢复，
+      // 所以这里 rotateY 能正常显示立体旋转。如果将来需要拖动中也带飞入（目前不要），
+      // 就得用 perspective 不为 none 的另一套表达。
+      var flyDx = d.flyDir ? d.flyDir * d.geom.step : 0;
+      var flyScale = d.flyDir ? 0.88 : 1;
+      var flyRotY = d.flyDir ? -d.flyDir * 10 : 0;     // +1 方向左，旋转 -10deg（从右推进）
       for (var i = 0; i < d.nodes.length; i++) {
         var n = d.nodes[i];
         if (n.el.style.display === 'none') continue;
         var e = (n.qi - d.index) + v;
         var ae = Math.abs(e);
-        var s = 1 - ae * d.geom.shrink; if (s < .2) s = .2;
+        var center = ae < .5;
+        // 只对**当前**中央卡叠飞入偏移。下一格（idx=1）的卡片虽然位移是 +1
+        // 个 step，但它不是 d.index，不算「中央卡」，不能让它也偏移——否则
+        // 会出现「两张卡同时从右飞入」的怪画面。
+        var dx = (center && d.flyDir) ? (e * d.geom.step + flyDx) : (e * d.geom.step);
+        var sc = (center && d.flyDir) ? (flyScale * (1 - ae * d.geom.shrink)) : (1 - ae * d.geom.shrink);
+        if (sc < .2) sc = .2;
         var op = 1 - ae * d.geom.fade; if (op < 0) op = 0;
-        n.el.style.transform = 'translateX(calc(-50% + ' + (e * d.geom.step).toFixed(2) + 'px))'
-          + ' scale(' + s.toFixed(4) + ')';
+        var tr = 'translateX(calc(-50% + ' + dx.toFixed(2) + 'px))'
+          + ' scale(' + sc.toFixed(4) + ')';
+        if (center && d.flyDir) tr += ' rotateY(' + flyRotY + 'deg)';
+        n.el.style.transform = tr;
         n.el.style.opacity = op.toFixed(3);
         n.el.style.zIndex = String(1000 - Math.round(ae * 100));
         // 这里**不再**给卡片写 pointer-events。卡片是透明的盒子、两个面把它盖满，
@@ -942,7 +966,6 @@
         // 之前写过 `pointerEvents = center ? 'auto' : 'none'`，是个谎：面的 auto 会
         // 覆盖祖先的 none，侧卡照旧能接到点击 —— 实测就是「点侧卡也会翻面」。
         // 现在侧卡**故意**可点：点它是「我要看这一张」，由 click 处理器滚过去（goTo）。
-        var center = ae < .5;
         n.el.tabIndex = center ? 0 : -1;
       }
       syncTabs();
@@ -1030,10 +1053,14 @@
       if (ni === d.index) { rebind(); return; }
       var ce = centerEl();
       if (isFlipped(ce)) setFlipped(ce, false, true);
+      var dir = ni > d.index ? 1 : -1;
       d.index = ni;
       d.dragX = 0;
       cardsBox.classList.remove('dragging');
-      syncNodes(); layout(); paint(); ensureThumbs();
+      syncNodes(); paint(); ensureThumbs();
+      // 不调 layout：让新中央卡保留上一帧 transform，playFlyIn 设 flyDir 后
+      // 再 layout（写「下一格位置 + 偏移」）→ transition 飞入。参见 snap 注释。
+      playFlyIn(dir);
     }
     function commit(dir) { goTo(d.index + dir); }
     function rebind() {
@@ -1122,13 +1149,56 @@
         if (ni < 0) ni = 0;
         if (ni > d.queue.length - 1) ni = d.queue.length - 1;
         if (ni !== d.index) {
+          var dir = ni > d.index ? 1 : -1;     // 下一页=+1、上一页=-1
           d.index = ni;
           syncNodes(); paint(); ensureThumbs();
+          d.dragX = 0;
+          cardsBox.classList.remove('dragging');
+          // 不调 layout：新中央卡的 transform 保留它上一帧的值（被 syncNodes
+          // 回收复用后是「上一帧它在窗口里的某个位置」），由 playFlyIn 设
+          // flyDir 后调 layout 写「下一格位置 + 偏移」，transition 自动从
+          // 保留值过渡到新值 → 飞入效果。如果这里先 layout 一次再 playFlyIn，
+          // 中央卡瞬间到「标准位 0」，动画就消失了。
+          playFlyIn(dir);
+          return;
         }
       }
       d.dragX = 0;
       cardsBox.classList.remove('dragging');
       layout();
+    }
+    // 翻页落定时的「飞入动画」（2026-09-24）：新中央卡从下一格/上一格位置以
+    // 偏移 + 缩放 + 旋转飞入标准中央位。dir=+1 从右侧、-1 从左侧。
+    // 用 CSS transition (.34s) 播放，350ms 后清掉 flyDir 让 layout 把中央卡
+    // 写到标准位置，CSS 自动过渡收尾。
+    var FLY_MS = 350;
+    var flyTimer = null;
+    function playFlyIn(dir) {
+      if (flyTimer) { clearTimeout(flyTimer); flyTimer = null; }
+      d.flyDir = dir;
+      // 关键：snap 在调 playFlyIn 之前已经 layout 过一次——中央卡 transform
+      // 当时是「纯标准位」（flyDir=0）。playFlyIn 这里**必须**再 layout 一
+      // 次，把 flyDir 带来的偏移 + 旋转 + 缩放叠加进 transform。浏览器感知
+      // transform 变化，触发 .34s transition，从「纯标准位」→「偏移位」过渡
+      // ——不对，方向反了：用户期望的是「从偏移位→标准位」飞入，不是反向。
+      //
+      // 正确做法：snap 在 syncNodes 之后**先不**layout（中央卡 transform 还
+      // 留在 d.dragX=0 但因 syncNodes index 变了的旧位），然后 playFlyIn 设
+      // flyDir 再 layout——但中央卡此时还在旧位（d.index 已经更新，layout
+      // 算出的 e 是 0 + 偏移位）。OK 这个方向是对的：旧位（snap 之前的旧
+      // 中央 transform）→ 偏移位（layout 加 flyDir 偏移）→ 标准位（350ms 后
+      // 清 flyDir 再 layout）。但 snap 之前已经调过 layout 写过旧位，那是
+      // **旧 d.index** 下的位置，新 d.index 下旧中央节点可能已经被 syncNodes
+      // 重新分配了（变成侧卡），新中央节点是另一个 el（带新内容但 transform
+      // 是上一帧某个值）。所以"旧位→偏移位→标准位"实际是新中央 el 的 transform
+      // 从「上一帧某个值」→「偏移位」→「标准位」。视觉上：新中央卡带着新
+      // 内容从「下一格位置带旋转缩放」飞入标准位。这正是我们要的飞入效果。
+      layout();
+      flyTimer = setTimeout(function () {
+        flyTimer = null;
+        d.flyDir = 0;
+        layout();
+      }, FLY_MS);
     }
 
     /* ---------- 跟手拖拽 ---------- */
@@ -1224,11 +1294,11 @@
         else dir = velNow < 0 ? 1 : -1;
       }
       if (dist > MOVED_PX) d.movedAt = Date.now();     // 这一下手要吞掉随后的 click
-      // 惯性：甩得够快（且方向明确）时，先按「拖过的格数」兑现，再从松手速度
-      // 继续滑；否则维持原来的「翻格 / 回弹」收尾。惯性只认「有速度的甩动」，
-      // 位移够大但手指是慢慢拖过去的（无速度）仍走老路径，不凭空多滑。
+      // 惯性：甩得够快（且方向明确）时直接启惯性。惯性 frame 里翻过的张数由
+      // startInertia 自己处理（不调 goTo、不播飞入——惯性滑行中牌堆在连续运动，
+      // 牌堆位移本身就是动画，再叠卡片旋转会顿挫）。真正的「飞入」留给
+      // snap：惯性结束时 snap 吸附那一刻才播。
       if (dist >= MIN_FLICK && Math.abs(velNow) >= INERTIA_MIN) {
-        if (dir) goTo(d.index + dir * pages);
         startInertia(velNow);
         return;
       }
