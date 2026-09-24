@@ -1058,9 +1058,13 @@
       d.dragX = 0;
       cardsBox.classList.remove('dragging');
       syncNodes(); paint(); ensureThumbs();
-      // 不调 layout：让新中央卡保留上一帧 transform，playFlyIn 设 flyDir 后
-      // 再 layout（写「下一格位置 + 偏移」）→ transition 飞入。参见 snap 注释。
-      playFlyIn(dir);
+      // 不调 layout：让新中央卡的 transform 保留它的「上帧值」（el 复用时
+      // 是上一帧 layout 写过的某个 qi 对应位置；新分配 el 则是空）。由
+      // playFlyIn 接管 transform——noanim 瞬跳「偏移位」+ reflow + 摘
+      // noanim + 写「标准位」触发 .34s 单段「偏移位→标准位」正向飞入。
+      // （**注意**：playFlyIn 必须**晚于** syncNodes**——syncNodes 把 d.nodes
+      // 重新分配，新中央 el（qi === d.index 的 el）已经定型才能取到对的那个）
+      playFlyIn(centerEl(), dir);
     }
     function commit(dir) { goTo(d.index + dir); }
     function rebind() {
@@ -1154,12 +1158,11 @@
           syncNodes(); paint(); ensureThumbs();
           d.dragX = 0;
           cardsBox.classList.remove('dragging');
-          // 不调 layout：新中央卡的 transform 保留它上一帧的值（被 syncNodes
-          // 回收复用后是「上一帧它在窗口里的某个位置」），由 playFlyIn 设
-          // flyDir 后调 layout 写「下一格位置 + 偏移」，transition 自动从
-          // 保留值过渡到新值 → 飞入效果。如果这里先 layout 一次再 playFlyIn，
-          // 中央卡瞬间到「标准位 0」，动画就消失了。
-          playFlyIn(dir);
+          // 不调 layout：新中央卡保留上帧 transform；playFlyIn 用 noanim
+          // 接管——noopanim 写「偏移位」+ reflow + 摘 noanim + 写「标准位」
+          // → 单段「偏移位→标准位」.34s 正向飞入（**不会**触发反向过渡）。
+          // （syncNodes 之后才能取 centerEl——那时新中央 el 已经定型）
+          playFlyIn(centerEl(), dir);
           return;
         }
       }
@@ -1167,38 +1170,48 @@
       cardsBox.classList.remove('dragging');
       layout();
     }
-    // 翻页落定时的「飞入动画」（2026-09-24）：新中央卡从下一格/上一格位置以
-    // 偏移 + 缩放 + 旋转飞入标准中央位。dir=+1 从右侧、-1 从左侧。
-    // 用 CSS transition (.34s) 播放，350ms 后清掉 flyDir 让 layout 把中央卡
-    // 写到标准位置，CSS 自动过渡收尾。
-    var FLY_MS = 350;
-    var flyTimer = null;
-    function playFlyIn(dir) {
-      if (flyTimer) { clearTimeout(flyTimer); flyTimer = null; }
-      d.flyDir = dir;
-      // 关键：snap 在调 playFlyIn 之前已经 layout 过一次——中央卡 transform
-      // 当时是「纯标准位」（flyDir=0）。playFlyIn 这里**必须**再 layout 一
-      // 次，把 flyDir 带来的偏移 + 旋转 + 缩放叠加进 transform。浏览器感知
-      // transform 变化，触发 .34s transition，从「纯标准位」→「偏移位」过渡
-      // ——不对，方向反了：用户期望的是「从偏移位→标准位」飞入，不是反向。
-      //
-      // 正确做法：snap 在 syncNodes 之后**先不**layout（中央卡 transform 还
-      // 留在 d.dragX=0 但因 syncNodes index 变了的旧位），然后 playFlyIn 设
-      // flyDir 再 layout——但中央卡此时还在旧位（d.index 已经更新，layout
-      // 算出的 e 是 0 + 偏移位）。OK 这个方向是对的：旧位（snap 之前的旧
-      // 中央 transform）→ 偏移位（layout 加 flyDir 偏移）→ 标准位（350ms 后
-      // 清 flyDir 再 layout）。但 snap 之前已经调过 layout 写过旧位，那是
-      // **旧 d.index** 下的位置，新 d.index 下旧中央节点可能已经被 syncNodes
-      // 重新分配了（变成侧卡），新中央节点是另一个 el（带新内容但 transform
-      // 是上一帧某个值）。所以"旧位→偏移位→标准位"实际是新中央 el 的 transform
-      // 从「上一帧某个值」→「偏移位」→「标准位」。视觉上：新中央卡带着新
-      // 内容从「下一格位置带旋转缩放」飞入标准位。这正是我们要的飞入效果。
-      layout();
-      flyTimer = setTimeout(function () {
-        flyTimer = null;
-        d.flyDir = 0;
-        layout();
-      }, FLY_MS);
+    // 翻页落定时的「飞入动画」（2026-09-24 #041 修停顿·关键设计）：
+    //
+    // 旧版用「flyDir 状态 + layout() 写偏移位 + 350ms 后 layout 写标准位」——
+    // 这个方案会被浏览器感知为**两段**过渡：① snap 不调 layout → 新中央 el
+    // 仍是「上一帧 transform」；② playFlyIn 设 flyDir=1 → 写「偏移位」→ 浏览器
+    // 从「上帧值」过渡到「偏移位」.34s；③ 350ms 后清 flyDir=0 → 写「标准位」
+    // → 浏览器又起一段「偏移位→标准位」.34s。两段过渡中间会看到卡片停在
+    // 「偏移位」，就是用户报的「从左往右的停顿」。
+    //
+    // 正确修法：**单段正向过渡**「偏移位 → 标准位」。用 noanim 把新中央 el
+    // 瞬时落到「偏移位」（作为过渡起点），reflow 让 noanim 生效，摘 noanim
+    // 恢复 .34s transition，再写标准位让浏览器感知变化入队「偏移位→标准位」
+    // 的单段 .34s 飞入。无 setTimeout、无 flyDir 状态——这一切是**就地写**的：
+    // 同步 noanim→reflow→摘 noanim→reflow→标准位。**对调用方的契约**：传入
+    // **新中央 el**（qi === d.index 的节点），playFlyIn 接管其 transform，
+    // 直到 .34s 过渡结束由 layout() 重新接手（dragX=0、flyDir=0 时 layout
+    // 写的就是标准位，与 playFlyIn 的落点一致——不会乱序）。
+    //
+    // 仅在「真的翻了页」时播，余量回弹（pages=0）不播，否则松手不足半格也
+    // 飞一下，体验上就成「粘手」。
+    function playFlyIn(el, dir) {
+      if (!el) return;
+      var step = d.geom.step;
+      var dx = dir * step;
+      // 1) 加 .noanim → 强制 transition:none，下面的 transform 瞬时落位
+      //    注意：iOS Safari 对带 rotateY 的 transform 每帧重算 3D 合成层
+      //    （即使过渡很短，3D 重算开销仍会拖低帧率），这里**只用** translateX
+      //    + scale（纯 2D 合成器属性），保留「推进 + 放大」的飞入语言、放弃
+      //    立体旋转——上一轮 #040 选了「明显立体 (10°)」，但用户在真机反馈
+      //    「流畅度不够」，所以必须把真机 3D 开销砍掉。
+      el.classList.add('noanim');
+      el.style.transform = 'translateX(calc(-50% + ' + dx.toFixed(2) + 'px)) scale(.88)';
+      // 2) 强制 reflow 让「加 .noanim + transform 写入」被采纳，避免下两步同帧
+      void el.offsetHeight;
+      // 3) 摘 .noanim → 恢复 .34s transition
+      el.classList.remove('noanim');
+      // 4) 强制 reflow 让「摘 .noanim」与下一步 transform 写入跨帧（否则
+      //    transition 状态变化和 transform 变化同帧，浏览器可能不感知前/后差）
+      void el.offsetHeight;
+      // 5) 同步改 transform 到「标准位」——浏览器感知 transform 变化 + transition
+      //    已激活 → 播「偏移位 → 标准位」.34s 单段正向飞入
+      el.style.transform = 'translateX(calc(-50% + 0px)) scale(1)';
     }
 
     /* ---------- 跟手拖拽 ---------- */
