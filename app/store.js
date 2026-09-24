@@ -455,6 +455,97 @@
       .then(function (r) { unwrap(r, '读埋点'); return r.data || []; });
   }
 
+  // 报表明细不用 loadEvents 的 2000 行截断。先读精确总数，再按稳定排序分页；
+  // 每页都核对 count、行数与唯一键，结束后再核对一次总数。发现读数期间有变化就
+  // 明确报错，让页面刷新重试，不把截断或重复结果伪装成完整导出。
+  // 200 是客户端批大小，不代表平台最大分页上限；平台上限没有在本机权威文档中给出。
+  var REPORT_PAGE_SIZE = 200;
+
+  function reportRows(table, columns, countColumns, orderBy, keyOf, label, applyFilter) {
+    function query(head) {
+      var q = cloud.database.from(table).select(head ? countColumns : columns,
+        { count: 'exact', head: !!head });
+      if (applyFilter) q = applyFilter(q);
+      if (!head) orderBy.forEach(function (o) {
+        q = q.order(o.column, { ascending: o.ascending });
+      });
+      return q;
+    }
+
+    function countNow() {
+      return query(true).then(function (r) {
+        unwrap(r, '统计' + label);
+        if (typeof r.count !== 'number' || !isFinite(r.count)) {
+          throw new Error('读取' + label + '总数失败，无法保证分页完整性');
+        }
+        return r.count;
+      });
+    }
+
+    return countNow().then(function (expected) {
+      var rows = [], seen = Object.create(null);
+      function readPage(offset) {
+        if (offset >= expected) return Promise.resolve(rows);
+        var end = Math.min(offset + REPORT_PAGE_SIZE - 1, expected - 1);
+        return query(false).range(offset, end).then(function (r) {
+          unwrap(r, '读取' + label);
+          var data = Array.isArray(r.data) ? r.data : [];
+          var want = end - offset + 1;
+          if (r.count !== expected || data.length !== want) {
+            throw new Error(label + '分页期间总数或页长发生变化，请刷新后重试');
+          }
+          data.forEach(function (row) {
+            var key = String(keyOf(row));
+            if (seen[key]) throw new Error(label + '分页出现重复记录，请刷新后重试');
+            seen[key] = true;
+            rows.push(row);
+          });
+          return readPage(offset + data.length);
+        });
+      }
+
+      return readPage(0).then(function () {
+        if (rows.length !== expected || Object.keys(seen).length !== expected) {
+          throw new Error(label + '读取行数与总数不一致，请刷新后重试');
+        }
+        return countNow().then(function (after) {
+          if (after !== expected) throw new Error(label + '读取期间发生变化，请刷新后重试');
+          return rows;
+        });
+      });
+    });
+  }
+
+  function reportEvents() {
+    return cloud.database.from('events').select('id').order('id', { ascending: false }).limit(1)
+      .then(function (r) {
+        unwrap(r, '读取埋点范围');
+        var maxId = (r.data || [])[0] && (r.data || [])[0].id;
+        if (maxId == null) return [];
+        return reportRows('events', 'id,name,at,props', 'id',
+          [{ column: 'id', ascending: true }], function (row) { return row.id; }, '事件',
+          function (q) { return q.lte('id', maxId); });
+      });
+  }
+
+  function reportProjectUsage() {
+    return Promise.all([
+      reportRows('projects', PROJECT_COLS, 'id',
+        [{ column: 'id', ascending: true }], function (row) { return row.id; }, '项目'),
+      reportRows('project_items', PROJECT_ITEM_COLS, 'project_id,item_id', [
+        { column: 'project_id', ascending: true }, { column: 'item_id', ascending: true }
+      ], function (row) { return String(row.project_id) + ':' + String(row.item_id); }, '项目素材关联')
+    ]).then(function (result) {
+      var counts = Object.create(null), latest = Object.create(null);
+      result[1].forEach(function (row) {
+        var key = String(row.project_id);
+        counts[key] = (counts[key] || 0) + 1;
+        if (row.saved_at && (!latest[key] || String(row.saved_at) > String(latest[key]))) latest[key] = row.saved_at;
+      });
+      return { projects: result[0], itemCounts: counts, latestSavedAt: latest, totalLinks: result[1].length };
+    });
+  }
+
   // 取某个事件**最早**的 N 条（2026-09-20 新增，为修正 A1 的样本窗口）。
   //
   // 为什么必须单独一个方法、不能在 loadEvents 的结果上截取：
@@ -545,6 +636,8 @@
     fetchItemByShareToken: fetchItemByShareToken,
     insertEvent: insertEvent,
     loadEvents: loadEvents,
+    reportEvents: reportEvents,
+    reportProjectUsage: reportProjectUsage,
     loadFirstEvents: loadFirstEvents,
     reportItems: reportItems,
     newShareToken: newShareToken,

@@ -46,6 +46,7 @@
   var S = global.Elangit.store;
   var SID_KEY = 'elangit.sid';
   var SES_KEY = 'elangit.track.lastSessionDay';
+  var EVENT_VERSION = '1';
 
   // A4 的成功阈值。改这里就等于改验收口径，必须同步改 PRD 与数据页文案。
   var SEARCH_OK_MS = 10000;
@@ -74,11 +75,36 @@
     return !!(a && a.isOwner());
   }
 
+  // 只保存固定页面类别，不保存 pathname、query 或 hash，避免把 /s/、/i/ 分享令牌
+  // 一起写进事件。渠道暂未采集，明确记空值，不能把未知来源伪称为「直接访问」。
+  function pageName() {
+    var path = String((global.location && global.location.pathname) || '').toLowerCase();
+    if (/(^|\/)s\//.test(path) || /(^|\/)i\//.test(path)) return 'share';
+    if (/(^|\/)projects\//.test(path)) {
+      if (/\/deck\.html$/.test(path)) return 'project-deck';
+      if (/\/workspace\.html$/.test(path)) return 'project-workspace';
+      return 'project-list';
+    }
+    var file = path.split('/').pop();
+    var pages = {
+      '': 'home', 'index.html': 'home', 'library.html': 'library',
+      'add.html': 'add', 'item.html': 'item', 'stats.html': 'stats',
+      'share.html': 'share'
+    };
+    return pages[file] || 'unknown';
+  }
+
   /* ---------- 记一笔 ---------- */
 
   function event(name, props) {
     if (!isOwner()) return Promise.resolve(false);
-    var body = Object.assign({ sid: sid(), device: device() }, props || {});
+    var body = Object.assign({}, props || {}, {
+      sid: sid(),
+      device: device(),
+      page: pageName(),
+      event_version: EVENT_VERSION,
+      channel: null
+    });
     return S.insertEvent(name, body).then(function () { return true; })
       .catch(function (e) {
         // 只说一句，不打断任何流程。埋点不该有机会让界面出错。
@@ -166,11 +192,11 @@
       outcome: outcome,
       ms: ms,
       kind: c.kind,
-      q: c.q,
-      cat: c.cat,
-      tags: c.tags,
-      n: c.n,
-      total: c.total
+      has_query: c.has_query,
+      query_length: c.query_length,
+      filtered: c.filtered,
+      result_count: c.result_count,
+      total_count: c.total_count
     }, extra || {}));
   }
 

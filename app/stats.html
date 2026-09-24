@@ -50,6 +50,25 @@
   .track{height:6px;border-radius:3px;background:#EFEDE9;overflow:hidden;margin-top:6px}
   .track i{display:block;height:100%;background:#1C1B19}
 
+  .notice{border:1px solid #E9D9C5;background:#FBF7F1;border-radius:8px;padding:11px 13px;
+    color:var(--ink-2);font-size:12.5px;line-height:1.65;margin:0 0 18px}
+  .filters{display:grid;grid-template-columns:repeat(auto-fit,minmax(138px,1fr));gap:10px;margin:0 0 12px}
+  .filters label{display:flex;flex-direction:column;gap:5px;color:var(--ink-2);font-size:12px}
+  .filters input,.filters select{width:100%;min-height:36px;border:1px solid var(--line);border-radius:6px;
+    background:#fff;color:var(--ink);font:inherit;padding:6px 8px}
+  .actions{display:flex;flex-wrap:wrap;gap:8px;margin:10px 0 12px}
+  .actions button,.pager button{font:inherit;padding:7px 11px;border:1px solid var(--line);background:#fff;
+    border-radius:6px;color:var(--ink);cursor:pointer}
+  .actions button:hover,.pager button:hover{background:#F7F5F2}
+  .actions button:disabled,.pager button:disabled{opacity:.45;cursor:default}
+  .table-scroll{overflow-x:auto}
+  .event-table{min-width:820px}
+  .event-table .props{max-width:360px;overflow-wrap:anywhere;color:var(--ink-2)}
+  .event-meta{font-size:12px;color:var(--ink-3);margin:8px 0}
+  .pager{display:flex;align-items:center;justify-content:flex-end;gap:10px;margin-top:12px;font-size:12px;color:var(--ink-3)}
+  .empty-row{text-align:center;color:var(--ink-3);padding:18px 10px!important}
+  @media(max-width:520px){.wrap{padding-left:14px;padding-right:14px}.actions button{flex:1 1 42%}}
+
   .need{max-width:560px;margin:70px auto;padding:0 22px;text-align:center;color:var(--ink-3);line-height:1.8}
 </style>
 </head>
@@ -77,9 +96,17 @@
 <main class="wrap" id="report" style="display:none">
   <h1>数据</h1>
   <div class="sub">
-    只为回答一件事：<b>PRD 1.2 的核心假设成不成立</b>。<br>
-    下面的数字都从库里现算，不是写死的历史值 —— 所以样本少的时候它们会很难看，这是对的。<br>
-    门槛（多少条才算数）只在 <code>stats.js</code> 里定义一处：<b>不到门槛就不给百分比</b>，只报还差多少。
+    查看个人使用过程、项目当前状态与产品验收；事件筛选和 CSV 导出使用同一组日期及维度条件。<br>
+    验收门槛复用 <code>stats.js</code>，比较规则复用 <code>diff.js</code>；不到样本门槛就不给百分比。
+  </div>
+
+  <div class="notice">
+    权限说明：此页仅由前端所有者口令控制显示，数据库 9 张表仍对匿名角色开放读写；这不是安全边界。埋点不写敏感正文，分享访问不计入统计。
+  </div>
+
+  <div class="panel rep">
+    <h2>总览 <span class="tag">当前数据状态</span></h2>
+    <div id="overview"></div>
   </div>
 
   <div class="panel rep">
@@ -117,6 +144,40 @@
     <div class="why">「AI 判过矩形、用户又换了一次」说明裁得不准；「AI 从没判过就换图」说明这条没走过 AI 裁切。两者要修的东西不同。</div>
     <div id="cover"></div>
   </div>
+
+  <div class="panel rep">
+    <h2>项目使用 <span class="tag">当前状态</span></h2>
+    <div class="why">项目数与收藏数来自当前项目表。已取消的收藏、翻阅次数和历史转化没有单独记录，显示当前状态不代表历史使用量。</div>
+    <div id="projectUsage"></div>
+  </div>
+
+  <div class="panel rep">
+    <h2>事件明细 <span class="tag">可筛选、可导出</span></h2>
+    <div class="why">旧事件的搜索原词不显示也不导出；属性摘要只取白名单字段。渠道没有采集时显示「未记录」，不推断为直接访问。</div>
+    <div class="filters" id="eventFilters">
+      <label>开始日期（上海）<input type="date" id="fromDate"></label>
+      <label>结束日期（上海）<input type="date" id="toDate"></label>
+      <label>事件名<select id="eventNameFilter"><option value="">全部事件</option></select></label>
+      <label>页面<select id="pageFilter"><option value="">全部页面</option></select></label>
+      <label>设备<select id="deviceFilter"><option value="">全部设备</option></select></label>
+      <label>渠道<select id="channelFilter"><option value="">全部渠道</option></select></label>
+    </div>
+    <div class="actions">
+      <button type="button" id="applyEventFilters">筛选</button>
+      <button type="button" id="resetEventFilters">重置筛选</button>
+      <button type="button" id="refreshData">刷新数据</button>
+      <button type="button" id="exportEvents">导出筛选明细 CSV</button>
+      <button type="button" id="exportDaily">导出按日汇总 CSV</button>
+    </div>
+    <div class="event-meta" id="eventCount"></div>
+    <div class="table-scroll">
+      <table class="rtab event-table">
+        <thead><tr><th>ID</th><th>发生时间（上海）</th><th>事件</th><th>页面</th><th>版本</th><th>设备</th><th>渠道</th><th>安全属性摘要</th></tr></thead>
+        <tbody id="eventRows"><tr><td colspan="8" class="empty-row">加载中…</td></tr></tbody>
+      </table>
+    </div>
+    <div class="pager"><button type="button" id="eventPrev">上一页</button><span id="eventPager"></span><button type="button" id="eventNext">下一页</button></div>
+  </div>
 </main>
 
 <div id="toast"></div>
@@ -133,6 +194,7 @@
      渲染函数是 IIFE 私有的，一次性验证台拿不到，19/20、49/50、9/10、29/30
      这些临界值就只能靠肉眼看。抽出来才能断言。 -->
 <script src="stats.js"></script>
+<script src="monitoring.js"></script>
 <script src="track.js"></script>
 <script src="ownerbar.js"></script>
 <script>
@@ -144,9 +206,9 @@
   var esc = C.esc;
 
   var DAYS = 14;                       // 每日录入图看两周（= A12 的门槛，来自 stats.GATES.A12）
-  var EV_SINCE_DAYS = 60;              // 事件只往回读 60 天，够算所有指标
-                                       // ⚠️ A1 不用这个窗口：它要的是「最早 20 条」，
-                                       // 走 loadFirstEvents 单独查，不受 60 天限制。
+  var EV_SINCE_DAYS = 60;              // 验收与原有诊断沿用最近 60 天窗口
+  var EVENT_PAGE_SIZE = 50;
+  var M = window.Elangit.monitoring;
 
   /* ---------- 小工具 ---------- */
 
@@ -206,44 +268,83 @@
 
   /* ---------- 数据 ---------- */
 
-  var state = { items: [], events: [], a1Events: [], tax: null };
+  var state = {
+    items: [], events: [], metricEvents: [], a1Events: [], tax: null,
+    projectUsage: null, filteredEvents: [], eventPage: 0
+  };
+  var bootSerial = 0;
+
+  function defaultEventDates() {
+    if (!$('fromDate').value) $('fromDate').value = M.dayKey(Date.now() - (EV_SINCE_DAYS - 1) * 864e5);
+    if (!$('toDate').value) $('toDate').value = M.dayKey(Date.now());
+  }
 
   function boot() {
+    var serial = ++bootSerial;
     if (!window.Elangit.auth.isOwner()) {
+      $('report').style.display = 'none';
       $('needOwner').style.display = 'block';
       $('hdrNote').textContent = '只读浏览';
       return;
     }
     T.session();
-    var since = new Date(Date.now() - EV_SINCE_DAYS * 864e5).toISOString();
-
+    $('hdrNote').textContent = '正在读取报表…';
     Promise.all([
       S.reportItems(),
-      S.loadEvents(null, since),
+      S.reportEvents(),
       S.loadTaxonomy(),
       // A1 的样本窗口是**查询的属性**，必须单独取：
       // loadEvents 是倒序 + 只看 60 天，在它上面 slice(0, 20) 拿到的是
       // 「最近 60 天里最新的 20 条」，不是 PRD 要的「最早 20 条」。
       // 条数用 ST.a1Fetch()（>门槛）：A1 只认新口径的样本，多取一些来吸收
       // 被过滤掉的旧口径记录，否则窗口会被无效样本占满、显示成「样本不足」。
-      S.loadFirstEvents('item_create_finish', ST.a1Fetch())
+      S.loadFirstEvents('item_create_finish', ST.a1Fetch()),
+      S.reportProjectUsage()
     ]).then(function (r) {
+      if (serial !== bootSerial || !window.Elangit.auth.isOwner()) return;
       state.items = r[0];
       state.events = r[1];
       state.tax = r[2];
       state.a1Events = r[3];
-      $('hdrNote').textContent = state.items.length + ' 条素材 · ' + state.events.length + ' 条事件';
+      state.projectUsage = r[4];
+      var metricSince = Date.now() - EV_SINCE_DAYS * 864e5;
+      state.metricEvents = state.events.filter(function (e) {
+        var at = new Date(e.at).getTime();
+        return isFinite(at) && at >= metricSince;
+      });
+      $('hdrNote').textContent = state.items.length + ' 条素材 · 最近 ' + EV_SINCE_DAYS
+        + ' 天 ' + state.metricEvents.length + ' 条事件';
       $('report').style.display = 'block';
+      defaultEventDates();
+      fillEventFilters();
+      renderOverview();
       renderDaily();
       renderDiff();
       renderSearch();
       renderFallback();
       renderCover();
       renderAccept();
+      renderProjectUsage();
+      applyEventFilters();
     }).catch(function (e) {
+      if (serial !== bootSerial || !window.Elangit.auth.isOwner()) return;
       $('needOwner').style.display = 'block';
       $('needOwner').innerHTML = '<div class="need"><b>读不到数据</b><br>' + esc(S.describe(e)) + '</div>';
     });
+  }
+
+  function renderOverview() {
+    var a13 = ST.a13(state.items);
+    var projects = state.projectUsage ? state.projectUsage.projects : [];
+    var active = projects.filter(function (p) { return p.status === 'active'; }).length;
+    var archived = projects.filter(function (p) { return p.status === 'archived'; }).length;
+    $('overview').innerHTML = '<div class="kpis">'
+      + '<div class="kpi"><b>' + state.items.length + '</b><span>当前素材</span></div>'
+      + '<div class="kpi"><b>' + state.events.length + '</b><span>已记录事件（不等于访客数）</span></div>'
+      + '<div class="kpi"><b>' + active + ' / ' + archived + '</b><span>活跃 / 归档项目</span></div>'
+      + '<div class="kpi ' + (a13.enough ? '' : 'empty') + '"><b>'
+      + (a13.enough ? '待人工复盘' : esc(a13.text)) + '</b><span>A13：素材达到门槛只表示可以复盘</span></div>'
+      + '</div>';
   }
 
   /* ---------- 1. 每日录入条数 ---------- */
@@ -378,7 +479,7 @@
   /* ---------- 3. 找回效率（A4） ---------- */
 
   function renderSearch() {
-    var ev = state.events;
+    var ev = state.metricEvents;
     var attempts = ev.filter(function (e) { return e.name === 'search_attempt_end'; }).sort(byAt);
     var a = ST.a4(attempts);
 
@@ -479,13 +580,13 @@
   /* ---------- 5. 封面人工兜底（E13） ---------- */
 
   function renderCover() {
-    var ev = state.events.filter(function (e) { return e.name === 'cover_replaced'; });
+    var ev = state.metricEvents.filter(function (e) { return e.name === 'cover_replaced'; });
     if (!ev.length) {
       $('cover').innerHTML = '<div class="kpis"><div class="kpi empty"><b>还没有人工换过封面</b>'
         + '<span>这条是好事：说明 AI 给的裁切没让人不满意。有需要时在这里点一次就会被记下。</span></div></div>';
       return;
     }
-    var byReason = {};
+    var byReason = Object.create(null);
     ev.forEach(function (e) {
       var r = (e.props && e.props.reason) || 'unknown';
       byReason[r] = (byReason[r] || 0) + 1;
@@ -509,7 +610,7 @@
   /* ---------- 6. 验收进度 ---------- */
 
   function renderAccept() {
-    var attempts = state.events.filter(function (e) { return e.name === 'search_attempt_end'; }).sort(byAt);
+    var attempts = state.metricEvents.filter(function (e) { return e.name === 'search_attempt_end'; }).sort(byAt);
     var a1 = ST.a1(state.a1Events);
     var a2 = ST.a2(state.items, D);
     var a4 = ST.a4(attempts);
@@ -585,6 +686,179 @@
       + '以前「AI 返回空字符串」也进分母，于是「什么都没给」被显示成 100% 可用。'
       + '</div>';
   }
+
+  /* ---------- 项目当前使用 ---------- */
+
+  function formatShanghai(value, withTime) {
+    var date = new Date(value);
+    if (!isFinite(date.getTime())) return '未记录';
+    var options = withTime
+      ? { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }
+      : { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' };
+    try { return new Intl.DateTimeFormat('zh-CN', options).format(date); }
+    catch (e) { return date.toISOString(); }
+  }
+
+  function renderProjectUsage() {
+    var data = state.projectUsage || { projects: [], itemCounts: {}, latestSavedAt: {} };
+    if (!data.projects.length) {
+      $('projectUsage').innerHTML = '<div class="kpis"><div class="kpi empty"><b>还没有项目</b>'
+        + '<span>创建项目并收藏素材后，这里会列出当前项目状态。</span></div></div>';
+      return;
+    }
+    var rows = data.projects.map(function (project) {
+      var key = String(project.id), count = data.itemCounts[key] || 0;
+      var status = project.status === 'archived' ? '已归档' : '活跃';
+      var lastSaved = data.latestSavedAt[key] ? formatShanghai(data.latestSavedAt[key], true) : '暂无收藏';
+      return '<tr><td>' + esc(project.name || '未命名项目') + '</td>'
+        + '<td>' + status + '</td><td class="num">' + count + '</td>'
+        + '<td>' + esc(lastSaved) + '</td></tr>';
+    }).join('');
+    $('projectUsage').innerHTML = '<table class="rtab"><thead><tr><th>项目</th><th>状态</th>'
+      + '<th>当前收藏</th><th>最近收藏时间（上海）</th></tr></thead><tbody>' + rows + '</tbody></table>'
+      + '<div class="why" style="margin:10px 0 0">共 ' + data.totalLinks
+      + ' 条当前项目关联。已取消的收藏与翻阅次数没有历史记录，因此不从当前关系反推。</div>';
+  }
+
+  /* ---------- 事件明细、筛选与 CSV ---------- */
+
+  function fillSelect(id, values, allLabel, hasMissing) {
+    var select = $(id), previous = select.value;
+    select.innerHTML = '';
+    var all = document.createElement('option');
+    all.value = '';
+    all.textContent = allLabel;
+    select.appendChild(all);
+    if (hasMissing) {
+      var missing = document.createElement('option');
+      missing.value = M.MISSING;
+      missing.textContent = '未记录';
+      select.appendChild(missing);
+    }
+    values.filter(function (value) { return value !== ''; }).sort().forEach(function (value) {
+      var option = document.createElement('option');
+      option.value = value;
+      option.textContent = value;
+      select.appendChild(option);
+    });
+    if (Array.prototype.some.call(select.options, function (option) { return option.value === previous; })) {
+      select.value = previous;
+    }
+  }
+
+  function fillEventFilters() {
+    var names = Object.create(null), dimensions = {
+      page: { values: {}, missing: false },
+      device: { values: {}, missing: false },
+      channel: { values: {}, missing: false }
+    };
+    state.events.forEach(function (event) {
+      if (event.name) names[String(event.name)] = true;
+      ['page', 'device', 'channel'].forEach(function (key) {
+        var value = M.dimension(event, key);
+        if (value) dimensions[key].values[value] = true;
+        else dimensions[key].missing = true;
+      });
+    });
+    fillSelect('eventNameFilter', Object.keys(names), '全部事件', false);
+    fillSelect('pageFilter', Object.keys(dimensions.page.values), '全部页面', dimensions.page.missing);
+    fillSelect('deviceFilter', Object.keys(dimensions.device.values), '全部设备', dimensions.device.missing);
+    fillSelect('channelFilter', Object.keys(dimensions.channel.values), '全部渠道', dimensions.channel.missing);
+  }
+
+  function eventFilters() {
+    return {
+      from: $('fromDate').value,
+      to: $('toDate').value,
+      name: $('eventNameFilter').value,
+      page: $('pageFilter').value,
+      device: $('deviceFilter').value,
+      channel: $('channelFilter').value
+    };
+  }
+
+  function applyEventFilters() {
+    state.filteredEvents = M.filterEvents(state.events, eventFilters()).slice().sort(function (a, b) {
+      return String(b.at || '').localeCompare(String(a.at || ''));
+    });
+    state.eventPage = 0;
+    renderEventPage();
+  }
+
+  function renderEventPage() {
+    var rows = state.filteredEvents;
+    var pageCount = Math.max(1, Math.ceil(rows.length / EVENT_PAGE_SIZE));
+    state.eventPage = Math.min(state.eventPage, pageCount - 1);
+    var start = state.eventPage * EVENT_PAGE_SIZE;
+    var pageRows = rows.slice(start, start + EVENT_PAGE_SIZE);
+    $('eventCount').textContent = '符合筛选：' + rows.length + ' 条；当前显示 '
+      + (rows.length ? (start + 1) + '–' + (start + pageRows.length) : '0') + ' 条。'
+      + '报表数据于页面打开或点击「刷新数据」时读取。';
+    $('eventRows').innerHTML = pageRows.length ? pageRows.map(function (event) {
+      var summary = M.safeSummary(event);
+      return '<tr><td class="num">' + esc(event.id == null ? '' : event.id) + '</td>'
+        + '<td class="num">' + esc(formatShanghai(event.at, true)) + '</td>'
+        + '<td>' + esc(event.name || '未记录') + '</td>'
+        + '<td>' + esc(M.displayDimension(event, 'page')) + '</td>'
+        + '<td>' + esc(M.displayDimension(event, 'event_version')) + '</td>'
+        + '<td>' + esc(M.displayDimension(event, 'device')) + '</td>'
+        + '<td>' + esc(M.displayDimension(event, 'channel')) + '</td>'
+        + '<td class="props">' + (summary ? esc(summary) : '—') + '</td></tr>';
+    }).join('') : '<tr><td colspan="8" class="empty-row">当前条件下没有事件记录</td></tr>';
+    $('eventPager').textContent = '第 ' + (state.eventPage + 1) + ' / ' + pageCount + ' 页';
+    $('eventPrev').disabled = state.eventPage <= 0;
+    $('eventNext').disabled = state.eventPage >= pageCount - 1;
+  }
+
+  function downloadCsv(filename, content) {
+    var blob = new Blob([content], { type: 'text/csv;charset=utf-8' });
+    var url = URL.createObjectURL(blob), link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+  }
+
+  function exportEvents() {
+    var csv = M.toCsv(
+      ['事件 ID', '发生时间（UTC，ISO 8601）', '事件名', '页面', '事件结构版本', '设备', '渠道', '安全属性摘要'],
+      M.eventCsvRows(state.filteredEvents)
+    );
+    downloadCsv('elangit-events-' + M.dayKey(Date.now()) + '.csv', csv);
+  }
+
+  function exportDaily() {
+    var csv = M.toCsv(['日期（Asia/Shanghai）', '事件名', '次数'], M.dailyRows(state.filteredEvents));
+    downloadCsv('elangit-events-daily-' + M.dayKey(Date.now()) + '.csv', csv);
+  }
+
+  $('applyEventFilters').addEventListener('click', applyEventFilters);
+  ['fromDate', 'toDate', 'eventNameFilter', 'pageFilter', 'deviceFilter', 'channelFilter'].forEach(function (id) {
+    $(id).addEventListener('change', applyEventFilters);
+  });
+  $('resetEventFilters').addEventListener('click', function () {
+    $('fromDate').value = '';
+    $('toDate').value = '';
+    $('eventNameFilter').value = '';
+    $('pageFilter').value = '';
+    $('deviceFilter').value = '';
+    $('channelFilter').value = '';
+    defaultEventDates();
+    applyEventFilters();
+  });
+  $('refreshData').addEventListener('click', boot);
+  $('exportEvents').addEventListener('click', exportEvents);
+  $('exportDaily').addEventListener('click', exportDaily);
+  $('eventPrev').addEventListener('click', function () {
+    if (state.eventPage > 0) { state.eventPage--; renderEventPage(); }
+  });
+  $('eventNext').addEventListener('click', function () {
+    if ((state.eventPage + 1) * EVENT_PAGE_SIZE < state.filteredEvents.length) {
+      state.eventPage++; renderEventPage();
+    }
+  });
 
   /* ---------- 启动 ---------- */
 

@@ -156,9 +156,17 @@
   function trackSearch(kind) {
     var filtering = !!(state.q || state.tags.length || state.cat !== '全部');
     var n = state.filtered.length;
+    var query = String(state.q || '').trim();
+    var queryLength = Array.from ? Array.from(query).length : query.length;
     var cond = {
-      kind: kind, q: state.q, cat: state.cat, tags: state.tags.slice(),
-      n: n, total: state.index.length, filtered: filtering
+      kind: kind,
+      has_query: !!query,
+      query_length: queryLength,
+      has_filter: filtering,
+      filter_count: (state.cat !== '全部' ? 1 : 0) + state.tags.length,
+      result_count: n,
+      total_count: state.index.length,
+      filtered: filtering
     };
     // 先开一笔检索，再把 search_id 写进 E6 —— 同一个 id 让库里的
     // E6（发起）/ E7（点开）/ E14（结算）能串成一次完整的检索来回溯。
@@ -167,7 +175,14 @@
     T.event('search_execute', Object.assign({ search_id: searchId }, cond));
     if (!n && filtering) {
       T.event('search_zero_result', {
-        search_id: searchId, q: state.q, cat: state.cat, tags: state.tags.slice()
+        search_id: searchId,
+        kind: kind,
+        has_query: !!query,
+        query_length: queryLength,
+        has_filter: filtering,
+        filter_count: cond.filter_count,
+        result_count: 0,
+        total_count: state.index.length
       });
     }
   }
