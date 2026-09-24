@@ -225,8 +225,14 @@
      它依赖 store（模块顶层就取 store.cloud），必须排在 store.js 之后。 -->
 <script src="ai.js"></script>
 <script src="diff.js"></script>
+<script src="aiqueue.js"></script>
 <script src="track.js"></script>
 <script src="ownerbar.js"></script>
+<script>
+  // B-001：详情页也要能接着跑没跑完的 AI。典型情形是——录入完就关了页面，
+  // 回头从列表点进这一条看详情，这时候本页比谁都更清楚「用户正等着结果」。
+  window.Elangit.aiQueue.autoSweep({ delay: 1500 });
+</script>
 <script>
 (function () {
   'use strict';

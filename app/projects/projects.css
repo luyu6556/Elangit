@@ -269,6 +269,10 @@
 .dc-body{padding:14px 16px 12px;display:flex;flex-direction:column;gap:9px;flex:1;min-height:0}
 .dc-title{font-size:15px;font-weight:500;line-height:1.45;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:none}
 .dc-title.noname{color:var(--ink-3);font-weight:400}
+/* 标题来自服务端抓到的原文网页标题、而不是 AI 收敛后的项目名时的小注。
+   必须标出来：这两个名字来源不同，一个是原文事实，一个是模型判断。
+   混在一起显示，等于把没跑完的 AI 结果伪装成已经跑完（B-001）。 */
+.dc-note{font-size:11.5px;line-height:1.4;color:var(--ink-3);margin-top:-4px;flex:none}
 .dc-sum{font-size:13px;line-height:1.55;color:var(--ink);display:-webkit-box;-webkit-line-clamp:3;
   -webkit-box-orient:vertical;overflow:hidden}
 .dc-tags{display:flex;flex-wrap:nowrap;gap:4px;overflow-x:auto;overflow-y:hidden;scrollbar-width:none;

@@ -86,8 +86,16 @@
 <script src="auth.js"></script>
 <script src="cards.js"></script>
 <script src="store.js"></script>
+<script src="pipeline.js"></script>
+<script src="ai.js"></script>
+<script src="aiqueue.js"></script>
 <script src="track.js"></script>
 <script src="ownerbar.js"></script>
+<script>
+  // B-001：素材库同理——用户多半是从这里翻到那条一直显示「识别中」的素材，
+  // 让它在这儿被接手跑完，比让用户自己回想「是不是得回录入页补跑」自然。
+  window.Elangit.aiQueue.autoSweep({ delay: 2000 });
+</script>
 <script>
 (function () {
   'use strict';

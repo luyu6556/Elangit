@@ -245,6 +245,15 @@
   // 超时必须是真的中断（SDK 会把 signal 透传给 fetch），不能只是「放弃等待、
   // 请求还在后台跑」。这段原先内联在 analyze 里，detectRect 要用同一套行为，
   // 所以抽出来共用——两处各写一遍，迟早有一处忘了 clearTimeout。
+  // 统一的超时错误对象。抽出来是因为**有两个地方要抛它**（见下面两处），
+  // 两处各写一遍的话，迟早有一处忘了带 code。
+  function timeoutError(timeoutMs, t0) {
+    var err = new Error('识别超过 ' + Math.round(timeoutMs / 1000) + ' 秒未返回，已中断');
+    err.code = 'AI_TIMEOUT';
+    err.elapsedMs = Date.now() - t0;
+    return err;
+  }
+
   function streamOnce(opts, promptText, hasImage) {
     var ctrl = new AbortController();
     var timedOut = false;
@@ -289,15 +298,20 @@
         })();
       })
       .then(function (raw) {
+        // abort() 之后，SDK **不一定**抛 AbortError —— 实测（2026-09-24，timeoutMs=3000）：
+        // 调用在 3005ms 就 settle 了，但走的是 **resolve** 分支、内容是半截或空串。
+        // 那时 timedOut 已经是 true，若不做这道判据，事情会变成：
+        //   1. 超时被当成「模型返回的不是 JSON」处理（错误文案是「模型返回的不是
+        //      可解析的 JSON：」后面跟着空，用户根本看不出是超时）；
+        //   2. `e.code === 'AI_TIMEOUT'` 这个判据永远不成立，于是界面那句
+        //      「识别超时（已降级：封面用整图，抽屉标签留空）」永远不会出现；
+        //   3. 「慢」和「错」在数据上彻底混成一类，看不出该去优化什么。
+        // 所以：**只要定时器真的到点了，就是超时**，不管 SDK 用什么方式收尾。
+        if (timedOut) throw timeoutError(timeoutMs, t0);
         return { text: raw, ms: Date.now() - t0, firstChunkMs: firstChunkMs };
       })
       .catch(function (e) {
-        if (timedOut || (e && e.name === 'AbortError')) {
-          var err = new Error('识别超过 ' + Math.round(timeoutMs / 1000) + ' 秒未返回，已中断');
-          err.code = 'AI_TIMEOUT';
-          err.elapsedMs = Date.now() - t0;
-          throw err;
-        }
+        if (timedOut || (e && e.name === 'AbortError')) throw timeoutError(timeoutMs, t0);
         throw e;
       })
       .then(function (v) { clearTimeout(timer); return v; },

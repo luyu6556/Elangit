@@ -106,6 +106,23 @@ create table items (
   ai_digest       text
 );
 
+-- 2026-09-24 追加 · AI 队列的两列（线上与本地同），见 docs/10-问题台账.md B-001。
+-- 起因：AI 任务原先只存在录入页的内存数组里，用户录入完关掉页面，那条素材
+-- 就永远停在 status='pending' —— 界面一直显示「识别中」，实际上一个执行者都没有。
+-- 改成 **pending 本身就是队列**，任何页面打开都能接着跑，就必须有这两件东西：
+--
+--   ai_lease_until  租约到期时刻。认领时写入 now() + 150s（必须大于 AI 超时
+--                   90s，否则一次正常的慢调用跑到一半就被别人接管了）。跑完
+--                   写回 null。**认领用的是乐观锁**：
+--                   UPDATE ... WHERE id=? AND status='pending'
+--                             AND ai_lease_until IS NULL，抢到行才算拿到执行权。
+--                   租约存在的意义是「上一个执行者的页面崩了」：它不会自己清，
+--                   没有过期时间的话这条就再也没人敢碰。
+--   ai_attempts     认领过几次。累到 3 次仍没跑出来就不再自动重试，落 failed
+--                   （界面上的「待补」），把决定权交回给人。
+alter table items add column ai_lease_until timestamptz;
+alter table items add column ai_attempts integer not null default 0;
+
 -- ---------- 6. item_images（图片本体，base64 直接存库） ----------
 -- 为什么用 base64 存库而不是对象存储：平台 Storage 只对已登录用户开放，
 -- 与「不做账号体系 + 只读分享给外人」冲突。代价与体积实测见技术方案 3.6。

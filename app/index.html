@@ -138,8 +138,18 @@
 <script src="auth.js"></script>
 <script src="cards.js"></script>
 <script src="store.js"></script>
+<script src="pipeline.js"></script>
+<script src="ai.js"></script>
+<script src="aiqueue.js"></script>
+<script src="track.js"></script>
 <script src="ownerbar.js"></script>
 <script src="projects/projects.js"></script>
 <script>window.Elangit.projects.initHome();</script>
+<script>
+  // B-001：之前只有录入页会跑 AI，用户录入完关掉页面，那条就永远停在
+  // pending（界面一直转「识别中」）。现在任何页面都能接着跑——pending 本身
+  // 就是队列，靠数据库租约去重，所以首页、详情页、录入页同时开也不会重复跑。
+  window.Elangit.aiQueue.autoSweep({ delay: 2500 });
+</script>
 </body>
 </html>

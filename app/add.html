@@ -121,6 +121,7 @@
 <script src="pipeline.js"></script>
 <script src="store.js"></script>
 <script src="ai.js"></script>
+<script src="aiqueue.js"></script>
 <script src="track.js"></script>
 <script src="ownerbar.js"></script>
 <script>
@@ -128,6 +129,7 @@
   'use strict';
   var IMG = window.Elangit.imaging, AI = window.Elangit.ai, S = window.Elangit.store, cfg = window.Elangit.config;
   var T = window.Elangit.track;
+  var Q = window.Elangit.aiQueue;      // 库侧 AI 队列（B-001 根治，2026-09-24）
   var $ = function (id) { return document.getElementById(id); };
 
   // E1 的起点。**不再是 A1 的起点**（2026-09-21 改，见构建记录 #025）。
@@ -331,9 +333,11 @@
 
   /* ---------- 提交：本地入库 → 再排队跑 AI ---------- */
 
-  // AI 串行队列。实测单次调用 3.2–57.8s，慢在首字延迟；串行能保证
-  // 不会多条互相拖累，代价是后到的要排队——所以必须把「排队第几位」显示出来，
-  // 否则用户分不清「在排队」和「卡住了」。
+  // AI 队列：add.html 只管**本页的界面**——谁在跑、排第几位、跑了多少秒。
+  // 「怎么跑」在 `aiqueue.js`（B-001 根治后）。
+  // 为什么要分开：原先本页内存里的 aiQueue 就是唯一的任务队列，页面一关
+  // 任务就消失、而库里那条还写着 pending（Docs 台账 B-001）。现在真正排队的是
+  // 数据库里的 pending + 租约，本页这份数组只是**这一页要看见的顺序**。
   var aiQueue = [], aiBusy = false;
 
   function enqueueAi(itemId) {
@@ -449,7 +453,10 @@
           var writeMs = Date.now() - tWrite;
           // 先把卡片放出来，不等图片写完——素材这一刻已经存在了，
           // 这就是 F1-4「本地 ≤1 秒出图入库」要的效果。
-          if (coverRaw) state.raws[item.id] = { cover: coverRaw };
+          // 原件同时交给共享队列一份：内容与本页 state.raws 那份是同一张图，
+          // 但 aiqueue 在别的页面上也会跑，它有自己的缓存，
+          // 给了之后那条就不必每次再从库里解码一遍 1600px 原件。
+          if (coverRaw) { state.raws[item.id] = { cover: coverRaw }; Q.rememberRaw(item.id, coverRaw); }
           item._coverMs = coverMs;
           item._writeMs = writeMs;
           item._startedAt = Date.now();
@@ -509,165 +516,29 @@
     return state.items.filter(function (x) { return x.id === id; })[0];
   }
 
-  // 内存里没有原件时（比如页面刷新过），从库里的 1600px 原件重新解码。
-  function ensureRaw(itemId) {
-    var held = state.raws[itemId];
-    if (held && held.cover) return Promise.resolve(held.cover);
-    return S.getImages(itemId).then(function (imgs) {
-      if (!imgs.length) throw new Error('这条素材没有图片，无法重裁封面');
-      var item = findItem(itemId);
-      var idx = item ? (item.cover_index || 0) : 0;
-      var img = imgs[Math.min(idx, imgs.length - 1)];
-      return fetch(S.toDataUrl(img.mime, img.data_base64))
-        .then(function (r) { return r.blob(); })
-        .then(IMG.processRaw)
-        .then(function (raw) { state.raws[itemId] = { cover: raw }; return raw; });
-    });
-  }
-
-  // “有可用结果”不能只看摘要或标签：详情页还可能保留项目名、设计说明总结、
-  // 画面描述或 OCR。重跑异常时，任一项存在都说明不能把整条素材降成 failed。
-  function hasAiResult(item) {
-    return !!(item && (item.ai_title || item.ai_summary || item.ai_digest || item.ai_caption || item.ocr_text
-      || (item.ai_tags && item.ai_tags.length)));
-  }
-
+  // 真正干活的那份（读图 / 调模型 / 写库 / 放租约）在 aiqueue.js。
+  // 这里刻意只留三件事：把库里回来的结果刷进本页列表、把内存里的耗时与
+  // 失败原因挂到 _ai 上给界面用、以及识别「这条被别的页面抢了」。
+  // （这段原先 137 行，从 ensureRaw 到写回全都自己来一遍。两份实现分开写
+  //  的下场已经见过一次：一边改了另一边没改，bug 只在其中一条路径上出现。）
   function runAi(itemId) {
     var item = findItem(itemId);
     if (!item) return Promise.resolve();
-    var tax = state.taxonomy;
-    var patch = { status: 'pending' };
-    var hasImg = !!(state.raws[itemId] && state.raws[itemId].cover);
-    // E15：AI 开始跑（2026-09-22 新增）。
-    // 为什么必须有这一条：查 id 46 卡住的原因时发现，库里只有 `ai_process_done`，
-    // 于是「从来没开始跑」和「跑了但没回来」在数据上**完全一样**，只能靠猜。
-    // 加一条 start 之后两者一眼可分——这是本次唯一补不回来的观测缺口。
-    T.event('ai_process_start', { item_id: itemId, has_image: hasImg });
-    // AI 看的是「当前的封面那张图」（ensureRaw 就按 cover_index 取），
-    // 所以 AI 给的矩形属于 cover_index 这一张。等会儿要按这个 seq 落到 item_images。
-    var aiSeq = item.cover_index || 0;
+    return Q.run(itemId, item).then(function (res) {
+      var i = state.items.indexOf(item);
+      if (i < 0) return;
 
-    return ensureRaw(itemId).catch(function () { return null; }).then(function (coverRaw) {
-      var aiImageJob = coverRaw ? IMG.makeAiInput(coverRaw) : Promise.resolve(null);
-      return aiImageJob.then(function (aiImage) {
-        return AI.analyze({
-          aiImage: aiImage,
-          text: item.raw_text || '',
-          url: item.source_url || '',
-          // 抓到的网页标题/描述：只填网址的素材，模型原来只能看到一串 URL，
-          // 分类判错多半出在这里。这两段是真实文字，比 slug 猜词可靠得多。
-          pageTitle: item.page_title || '',
-          pageDesc: item.page_desc || '',
-          // 正文（2026-09-22）。说明为什么必须有它：摘要原先只能拿 og:title 与
-          // og:description 去写，而 gooood 的 og:description 是每篇都一样的
-          // 客套模板，于是摘要只能把标题念一遍。digest 那三段（理念/做法/效果）
-          // 更是非有正文不可——只靠标题编出来的三段一定是假的。
-          pageText: item.page_text || '',
-          taxonomy: tax
-        }).then(function (r) {
-          patch.status = 'done';
-          // 名字为空时不写 null：卡片上「没有名字」和「名字是空的」要能区分开，
-          // 用空串表示「AI 判不出」，null 表示「这一列从来没被填过」。
-          patch.ai_title = r.title || '';
-          patch.ai_summary = r.summary;
-          // 三段总结（理念/做法/效果）。空串表示「没有正文 / 这条不是设计项目」，
-          // 与「从来没被填过」（null）区分开——理由同 ai_title。
-          patch.ai_digest = r.digest || '';
-          patch.ai_caption = r.caption;
-          patch.ocr_text = r.ocrText;
-          patch.ai_tags = r.tags;
-          if (r.platform && !item.source_platform) patch.source_platform = r.platform;
-          if (r.category) patch.category = r.category;
-          // AI 说什么原样留一份（F5-6 要拿它做黄色对照、F2-8 要拿它算差异）。
-          // 用户改过的字段会被覆盖，但这份快照不会被用户改动影响。
-          patch.ai_raw = AI.snapshot(r);
-          // AI 给了可信矩形就重裁封面；矩形不可信时保持整图（封面不因 AI 而变差）
-          if (coverRaw && r.rect) {
-            return IMG.makeCover(coverRaw, r.rect).then(function (c) {
-              if (c.coverSource === 'crop') {
-                patch.cover_thumb = c.thumb.base64;
-                patch.cover_source = 'crop';
-              }
-              patch._ai = { ms: r.ms, firstChunkMs: r.firstChunkMs, rect: r.rect, categoryCorrected: r.categoryCorrected, outOfList: r.categoryOutOfList };
-              return patch;
-            });
-          }
-          patch._ai = { ms: r.ms, firstChunkMs: r.firstChunkMs, rect: null, categoryCorrected: r.categoryCorrected, outOfList: r.categoryOutOfList };
-          return patch;
-        }).catch(function (e) {
-          // F2-7：AI 失败不丢素材。素材已在库里，这里只调状态。
-          // 但要注意：如果这条之前已经识别成功过（重跑失败），不能把
-          // 好结果标成失败——那会让界面出现「失败」却有摘要的矛盾状态。
-          var hasResult = hasAiResult(item);
-          patch.status = hasResult ? 'done' : 'failed';
-          patch._ai = {
-            error: (e && e.code === 'AI_TIMEOUT') ? 'timeout' : '',
-            msg: fmtErr(e),
-            retryFailed: hasResult
-          };
-          return patch;
-        });
-      });
-    }).then(function (finalPatch) {
-      var local = finalPatch._ai || {};
-      delete finalPatch._ai;
-      return S.updateItem(itemId, finalPatch).then(function (saved) {
-        // 用服务端回来的行刷新本地模型，保证界面与库一致
-        var i = state.items.indexOf(item);
-        if (i >= 0 && saved) {
-          state.items[i] = Object.assign({}, item, saved);
-        } else if (i >= 0) {
-          Object.assign(state.items[i], finalPatch);
-        }
-        state.items[i >= 0 ? i : 0]._ai = local;
+      // 没抢到＝别的页面/设备正在跑同一条。这不是失败，**不能标 failed**，
+      // 也不能偷偷 retry——让人以为本页在跑才是说谎，所以界面换一句实话。
+      if (!res.claimed) {
+        state.items[i]._remote = true;
         renderList();
-
-        // E3：AI 返回。成功与否用最终状态判断，不看 local.error——
-        // 那个字段只在超时才非空，非超时的失败也是空串，拿它当信号会误报成功。
-        T.event('ai_process_done', {
-          item_id: itemId,
-          ok: finalPatch.status === 'done',
-          ms: local.ms || null,
-          ttft_ms: local.firstChunkMs || null,
-          got_rect: !!local.rect,
-          category_corrected: !!local.categoryCorrected,
-          had_image: hasImg
-        });
-
-        // 矩形按**图**存一份（2026-09-20 新增）。只留 items.ai_raw.rect 是不够的：
-        // 那只对应「送进模型的那一张」，用户一旦换封面图，那张新图就没有矩形可用，
-        // 「按 AI 矩形重裁」也就无从下手（A14 实测踩到）。
-        if (local.rect) {
-          return S.setImageRect(itemId, aiSeq, local.rect).catch(function (e) {
-            // 存矩形失败不能让这次识别看起来失败——AI 的结果已经写进 items 了。
-            console.warn('[ai] 裁切矩形没存上：' + S.describe(e));
-          });
-        }
-      });
-    }).catch(function (e) {
-      // 兜底。这一层原先**只改内存、不落库**，于是任何走到这里的异常
-      // （图片处理失败、最终入库写失败……）都会让这条素材**永远停在 pending**：
-      // 首页卡片一直转圈显示「识别中」，既不会变成「待补」，也没有重试入口，
-      // 库里还一条线索都不留。2026-09-22 手机端传截图（id 46）踩的就是这个坑
-      // ——事后实测同一条素材的 AI 请求本身完全正常（36.4s 正常返回 JSON），
-      // 但结果永远没落库。
-      // F2-7 写的是「AI 失败不丢素材」，那就必须把失败**记下来**，
-      // 而不是留在内存里等着被刷新清掉。
-      var it = findItem(itemId);
-      if (!it) return;      // 取不到这条就不写：无法判断它是否已有结果，宁可不写也不覆盖
-      // 重跑失败时不能把好结果标成失败（与上面 analyze 的 catch 同一判据）
-      var hasResult = hasAiResult(it);
-      it.status = hasResult ? 'done' : 'failed';
-      it._ai = { msg: fmtErr(e) };
+        return;
+      }
+      if (res.saved) state.items[i] = Object.assign({}, item, res.saved);
+      state.items[i]._remote = false;
+      state.items[i]._ai = res.info || null;
       renderList();
-      // E16：识别异常退出（走到兜底 catch 的那一类）。带上原文，下次不用再猜。
-      T.event('ai_process_fail', { item_id: itemId, where: 'runAi', msg: fmtErr(e) });
-      if (hasResult) return;   // 已有结果的不改库，免得把 done 覆盖成 failed
-      return S.updateItem(itemId, { status: 'failed' }).catch(function (e2) {
-        // 落库也失败时不再上抛：这条路径下游已经没有处理者，再抛只会变成
-        // 一条未捕获的 Promise 异常，把真正的错误盖掉。
-        console.warn('[ai] 失败状态没写进库：' + S.describe(e2));
-      });
     });
   }
 
@@ -688,6 +559,11 @@
 
   function statusHtml(it) {
     if (it.status === 'pending') {
+      // 本页没抢到租约（别的标签页/别的设备正在跑同一条）。
+      // 这时候显示「AI 识别中 · 已 N 秒」是假的——秒数没人在这边数。
+      if (it._remote) {
+        return '<span class="st pending"><span class="spin"></span>正在别处识别（另一个页面或设备已经在跑）</span>';
+      }
       if (state.running !== it.id) {
         var pos = aiQueue.indexOf(it.id);
         return '<span class="st pending"><span class="spin"></span>排队中 · 前面还有 '
@@ -702,7 +578,14 @@
       var why = (it._ai && it._ai.error === 'timeout')
         ? '识别超时（已降级：封面用整图，抽屉标签留空）'
         : (it._ai && it._ai.msg ? '识别失败：' + it._ai.msg : '上次识别没完成');
-      return '<span class="st failed">' + why + ' · 点「重跑 AI」可再试</span>';
+      // 秒数按配置的超时写，不要写死：超时先后从 60s 提到 90s（config.aiTimeoutMs），
+      // 而这里一度还写着「超过 60 秒未返回」——界面告诉用户的时间是假的。
+      var aiSec = Math.round(cfg.aiTimeoutMs / 1000);
+      return '<span class="st failed">'
+        + (it._ai && it._ai.error === 'timeout'
+            ? '识别超过 ' + aiSec + ' 秒未返回（封面用整图，标签留空）'
+            : why)
+        + ' · 点「重跑 AI」可再试</span>';
     }
     var ms = it._ai && it._ai.ms ? ' · ' + (it._ai.ms / 1000).toFixed(1) + 's' : '';
     var ttft = it._ai && it._ai.firstChunkMs ? '（首字 ' + (it._ai.firstChunkMs / 1000).toFixed(1) + 's）' : '';
@@ -761,7 +644,9 @@
     }
     if (it._ai && it._ai.retryFailed) {
       warn = '<div class="warnline">上一次重跑没成功（'
-        + (it._ai.error === 'timeout' ? '超过 60 秒未返回' : esc(it._ai.msg || '未知原因'))
+        + (it._ai.error === 'timeout'
+            ? '超过 ' + Math.round(cfg.aiTimeoutMs / 1000) + ' 秒未返回'
+            : esc(it._ai.msg || '未知原因'))
         + '），下面保留的是更早那次的结果。</div>' + warn;
     }
 
@@ -853,7 +738,8 @@
     if (anyPending && !state.ticker) {
       state.ticker = setInterval(function () {
         var it = findItem(state.running);
-        if (!it || it.status !== 'pending') return;
+        // _remote 的那条不在本页计时：它的进度在真正跑它的那个页面里
+        if (!it || it.status !== 'pending' || it._remote) return;
         var row = $('list').querySelector('.item[data-id="' + it.id + '"] .st');
         if (row) {
           var sec = Math.max(0, Math.round((Date.now() - (it._startedAt || Date.now())) / 1000));
@@ -1009,13 +895,16 @@
       retriedId = retryId;
       toast('正在重跑素材 #' + retryId + '（AI 调用是串行的）');
     }
-    var stuck = window.Elangit.auth.isOwner()
-      ? state.items.filter(function (it) { return it.status === 'pending' && it.id !== retriedId; })
-      : [];
-    if (stuck.length) {
-      toast('有 ' + stuck.length + ' 条上次没识别完，正在接着跑');
-      stuck.forEach(function (it) { enqueueAi(it.id); });
-    }
+    // 补跑不再只看「最近 8 条」，而是**扫库**（B-001）。
+    // 原先的判据是 `recentItems(8)`：早于这个窗口、或者上次是在别的设备上录的
+    // 素材，回来打开录入页也扫不到，于是永远停在 pending。
+    // sweep() 读的是 status='pending' 全表，靠租约去重，所以这里直接调它是安全的
+    // ——本页已经排进 enqueueAi 的那几条会抢不到租约，自然跳过。
+    if (!window.Elangit.auth.isOwner()) return;
+    return Q.sweep().then(function (res) {
+      if (res.ran) toast('有 ' + res.ran + ' 条上次没识别完，正在接着跑');
+      else if (res.dead) toast('有 ' + res.dead + ' 条试了多次都没跑出来，已标「待补」');
+    });
   }).catch(function (e) {
     $('listErr').style.display = 'block';
     $('listErr').textContent = '读数据库失败：' + fmtErr(e);

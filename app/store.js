@@ -41,7 +41,12 @@
     // share_token 也带上：详情页要显示「这条分享出去了没有」，
     // 少了它就只能另发一次查询（任务 7）
     'share_token',
-    'source_type', 'created_at', 'updated_at', 'ai_raw'
+    'source_type', 'created_at', 'updated_at', 'ai_raw',
+    // AI 队列的租约与重试次数（2026-09-24 新增，见 docs/10-问题台账.md B-001）。
+    // ai_lease_until = 这一条正被哪个页面认领跑、租约到几点；
+    // ai_attempts    = 认领过几次，用来判「试满三次仍没跑出来」。
+    // 带上它们是为了页面读到这一刻的执行状态，判断要不要显示重试入口。
+    'ai_lease_until', 'ai_attempts'
   ].join(',');
 
   function describe(err) {
@@ -118,6 +123,58 @@
       .then(function (r) {
         unwrap(r, '读素材');
         return r.data && r.data[0];
+      });
+  }
+
+  /* ---------- AI 队列（B-001 根治：pending 本身就是队列）---------- */
+
+  // 三个原语放在 store 而不是页面：改数据只能有一个入口，将来换介质
+  // 只改这一层。语义见 docs/10-问题台账.md B-001。
+  //
+  // claimAi 是**乐观锁**：UPDATE ... WHERE id=? AND status='pending'
+  // AND ai_lease_until IS NULL，抢到行才算拿到执行权。**返回 null 表示被别人
+  // 占着**——那不是错误，是「另一台设备/另一个标签页正在跑」，跳过即可。
+  //
+  // 坑（2026-09-24 实测）：判空**必须**用 `.is(col, null)`。写成
+  // `.eq(col, null)` 会被拼成 `ai_lease_until=eq.null`，服务端报
+  // 22007 invalid input syntax for type timestamp with time zone: "null"。
+  function claimAi(id, leaseUntil) {
+    return guard().then(function () {
+      return cloud.database.from('items')
+        .update({ ai_lease_until: leaseUntil })
+        .eq('id', id).eq('status', 'pending').is('ai_lease_until', null)
+        .select('id,status,ai_lease_until,ai_attempts');
+    }).then(function (r) {
+      unwrap(r, '领取 AI 任务');
+      return r.data && r.data[0] ? r.data[0] : null;
+    });
+  }
+
+  // 接管**已过期**的租约。上一个执行者关页/崩了，租约不会自己消失；
+  // 没有人接管，这条就永远卡在 pending——B-001 的根就在这里。
+  function stealAi(id, leaseUntil, nowIso) {
+    return guard().then(function () {
+      return cloud.database.from('items')
+        .update({ ai_lease_until: leaseUntil })
+        .eq('id', id).eq('status', 'pending').lt('ai_lease_until', nowIso)
+        .select('id,status,ai_lease_until,ai_attempts');
+    }).then(function (r) {
+      unwrap(r, '接管过期 AI 租约');
+      return r.data && r.data[0] ? r.data[0] : null;
+    });
+  }
+
+  // 队列快照。刻意只取这四个字段：sweep 只是要决定「谁该跑」，
+  // AI 真正需要的正文/图片在 execute 里按 id 再读一次。
+  function listPendingAi(limit) {
+    return cloud.database.from('items')
+      .select('id,status,ai_lease_until,ai_attempts,updated_at')
+      .eq('status', 'pending')
+      .order('id', { ascending: true })
+      .limit(limit || 20)
+      .then(function (r) {
+        unwrap(r, '读待跑队列');
+        return r.data || [];
       });
   }
 
@@ -219,6 +276,10 @@
     // 大多落在这里，搜「夯土」「模块化」这类词该命中它。
     // page_text（正文几千字）**不进**：理由同 page_desc，而且它会把列表页查询撑大。
     'ai_digest',
+    // ai_lease_until 进索引（2026-09-24）：卡面要靠它区分「真的在跑」和「没人跑」。
+    // B-001 的观感问题一半出在这里——原先 pending 一律显示"识别中"，
+    // 而那时候往往一个执行者都没有。
+    'ai_lease_until',
     'source_type', 'cover_source', 'cover_index', 'created_at'
   ].join(',');
 
@@ -612,6 +673,9 @@
     createItem: createItem,
     updateItem: updateItem,
     fetchItem: fetchItem,
+    claimAi: claimAi,
+    stealAi: stealAi,
+    listPendingAi: listPendingAi,
     recentItems: recentItems,
     deleteItem: deleteItem,
     addImages: addImages,

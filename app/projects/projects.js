@@ -782,10 +782,34 @@
       }).join('');
     }
 
+    // pending 不能一律显示「识别中」（B-001）。
+    // 判据是数据库里的租约：有租约且没过期 = 确实有人在跑；没租约或租约过期
+    // = 这一个执行者都没有，卡片上必须说实话，否则用户会一直等一个不存在的过程。
+    function pendingLabel(it) {
+      var until = it.ai_lease_until ? Date.parse(it.ai_lease_until) : 0;
+      if (until && until > Date.now()) {
+        return '<span class="stag st pending"><span class="spin"></span>识别中</span>';
+      }
+      return '<span class="stag st failed">还没识别完</span>';
+    }
+
+    // 标题的兜底链：AI 名 → **原文标题 → 未命名**。
+    // 中间那一级是 B-001 加的：只填网址收进来的素材，库里是有原文的
+    // page_title / page_desc 的，但卡面原先只看 ai_title，于是 AI 一没跑完，
+    // 整张卡就退化成「未命名 + 没有文字内容」，看着像「只爬到一张封面图」。
+    function cardTitle(it) {
+      var t = (it.ai_title || '').trim();
+      if (t) return { text: t, fromAi: true };
+      var p = (it.page_title || '').trim();
+      if (p) return { text: p, fromAi: false };
+      return { text: '未命名', fromAi: false, none: true };
+    }
+
     function deckCardHtml(it, th) {
       var cover = th && th.cover_thumb;
       var tags = (it.ai_tags || []).concat(it.my_tags || []);
-      var title = (it.ai_title || '').trim();
+      var titleR = cardTitle(it);
+      var title = titleR.text;
       var on = !!d.collected[it.id];
 
       var thumb;
@@ -800,14 +824,17 @@
       // 正面＝认人：封面 + 标题 + 摘要 + 标签 + 收藏。
       var front = '<div class="dc-thumb">' + thumb
           + (it.source_platform ? '<span class="plat">' + esc(it.source_platform) + '</span>' : '')
-          + (it.status === 'pending' ? '<span class="stag st pending"><span class="spin"></span>识别中</span>' : '')
+          + (it.status === 'pending' ? pendingLabel(it) : '')
           + (it.status === 'failed' ? '<span class="stag st failed">待补</span>' : '')
         + '</div>'
         + '<div class="dc-body">'
-          + '<div class="dc-title' + (title ? '' : ' noname') + '">' + (title ? esc(title) : '未命名') + '</div>'
+          + '<div class="dc-title' + (titleR.none ? ' noname' : '') + '">' + esc(title) + '</div>'
+          + (titleR.fromAi ? '' : (titleR.none ? ''
+              : '<div class="dc-note">原标题 · AI 还没识别</div>'))
           + '<div class="dc-sum">'
             + (it.ai_summary ? esc(it.ai_summary)
-               : (it.raw_text ? esc(it.raw_text.slice(0, 120)) : '（没有文字内容）'))
+               : (it.raw_text ? esc(it.raw_text.slice(0, 120))
+                 : (it.page_desc ? esc(it.page_desc.slice(0, 120)) : '（没有文字内容）')))
           + '</div>'
           + '<div class="dc-tags">' + tags.map(function (t) { return C.tagChip(TAX, t, {}); }).join('') + '</div>'
         + '</div>'
@@ -1037,8 +1064,11 @@
       $('dlist').innerHTML = d.order.map(function (id) {
         var it = d.index0[id];
         if (!it) return '';
+        // 兜底链与卡面保持一致（ai_title → 原文标题），否则同一条素材在
+        // 卡上是原文标题、在侧栏却叫「未命名」，看着像两条不同的东西。
+        var nm = it.ai_title || it.page_title || '未命名';
         return '<button type="button" data-goto="' + id + '" title="'
-          + esc(it.ai_title || '未命名') + '">' + esc(it.ai_title || '未命名') + '</button>';
+          + esc(nm) + '">' + esc(nm) + '</button>';
       }).join('') || '<div class="dstat">还没有收藏。看到合适的，点卡片右下角的爱心。</div>';
     }
 
