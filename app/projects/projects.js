@@ -1058,12 +1058,12 @@
       d.dragX = 0;
       cardsBox.classList.remove('dragging');
       syncNodes(); paint(); ensureThumbs();
-      // 不调 layout：让新中央卡的 transform 保留它的「上帧值」（el 复用时
-      // 是上一帧 layout 写过的某个 qi 对应位置；新分配 el 则是空）。由
-      // playFlyIn 接管 transform——noanim 瞬跳「偏移位」+ reflow + 摘
-      // noanim + 写「标准位」触发 .34s 单段「偏移位→标准位」正向飞入。
-      // （**注意**：playFlyIn 必须**晚于** syncNodes**——syncNodes 把 d.nodes
-      // 重新分配，新中央 el（qi === d.index 的 el）已经定型才能取到对的那个）
+      // 先调 layout：侧卡 transform 从「橡胶位置」刷成「标准侧卡位」——
+      // 上一版漏掉这一调用、侧卡永远停在橡胶位置，真机视觉像「翻不了」。
+      // playFlyIn 随后接管中央卡 transform，layout 写的「标准位 0」会被
+      // playFlyIn 的 noanim 偏移位覆盖、reflow 后又写回「标准位 0」触发 .34s
+      // 单段「偏移位→标准位」过渡——互不干扰。
+      layout();
       playFlyIn(centerEl(), dir);
     }
     function commit(dir) { goTo(d.index + dir); }
@@ -1158,10 +1158,13 @@
           syncNodes(); paint(); ensureThumbs();
           d.dragX = 0;
           cardsBox.classList.remove('dragging');
-          // 不调 layout：新中央卡保留上帧 transform；playFlyIn 用 noanim
-          // 接管——noopanim 写「偏移位」+ reflow + 摘 noanim + 写「标准位」
-          // → 单段「偏移位→标准位」.34s 正向飞入（**不会**触发反向过渡）。
-          // （syncNodes 之后才能取 centerEl——那时新中央 el 已经定型）
+          // 先调一次 layout：把侧卡的 transform 从「拖动期间 rubber 算出的偏
+          // 移位置」刷成「snap 后对应的标准侧卡位」。**上一版漏掉这一步**——
+          // 侧卡永远停在橡胶位置，视觉上像「牌堆没动」，是真机用户报「卡片
+          // 翻不了、会停留在上一个卡片」的根因。中央卡 transform 由 playFlyIn
+          // 接管飞入，layout 写的「标准位 0」会被 playFlyIn 的 noanim 偏移位
+          // 覆盖、reflow 后又写回「标准位 0」触发 .34s 单段过渡——互不干扰。
+          layout();
           playFlyIn(centerEl(), dir);
           return;
         }
