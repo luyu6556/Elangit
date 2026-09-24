@@ -159,10 +159,22 @@
    * @returns Promise<{claimed:boolean, status:string|null, saved:object|null, info:object|null}>
    */
   function run(id, hint) {
+    // 认领有**两条路**，顺序不能反，也一个都不能少：
+    //   claim 只认「租约是 NULL」的（从来没被认领过 / 上一个执行者正常收尾）；
+    //   steal 只认「租约已过期」的（上一个执行者死了，租约没人放）。
+    // 两者的 WHERE 条件**互斥**，缺任何一个都会留下一类没人管的孤儿：
+    //   少了 steal → 页面崩过一次的素材，租约停在过去某个时刻，既不是 NULL 也没人在跑，
+    //                于是谁都抢不到、永远停在 pending（B-003，2026-09-24 线上 id=49 实测）；
+    //   少了 claim → 刚录进来的那条（租约本来就是 NULL）压根没人认领。
     return claim(id).then(function (row) {
-      if (!row) return { claimed: false, status: null, saved: null };   // 别人在跑
-      return execute(id, row, hint).then(function (r) {
-        return Object.assign({ claimed: true }, r);
+      if (row) return execute(id, row, hint).then(function (r) {
+        return Object.assign({ claimed: true, how: 'claim' }, r);
+      });
+      return steal(id).then(function (stolen) {
+        if (!stolen) return { claimed: false, status: null, saved: null, info: null };
+        return execute(id, stolen, hint).then(function (r) {
+          return Object.assign({ claimed: true, how: 'steal' }, r);
+        });
       });
     });
   }
@@ -317,15 +329,21 @@
       // 串行：AI 调用本身是串行的，多条一起发只会互相抬首字延迟。
       var chain = Promise.resolve();
       var ran = 0;
+      var how = {};
       todo.forEach(function (r) {
         chain = chain.then(function () {
-          return run(r.id, r).then(function (res) { if (res.claimed) ran++; return res; });
+          return run(r.id, r).then(function (res) {
+            if (res.claimed) { ran++; how[res.how] = (how[res.how] || 0) + 1; }
+            return res;
+          });
         });
       });
       return chain.then(function () {
         return Promise.all(deadJobs);
       }).then(function () {
-        return { scanned: rows.length, ran: ran, dead: dead.length, skipped: false };
+        // how 里带认领方式（claim / steal）是给诊断用的：线上要能一眼看出
+        // 「这条是被正常认领的，还是从死掉的执行者手里接管来的」。
+        return { scanned: rows.length, ran: ran, dead: dead.length, how: how, skipped: false };
       });
     }).catch(function (e) {
       console.warn('[aiQueue] 扫描失败：' + S.describe(e));
