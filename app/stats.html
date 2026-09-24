@@ -205,26 +205,22 @@
   var $ = function (id) { return document.getElementById(id); };
   var esc = C.esc;
 
-  var DAYS = 14;                       // 每日录入图看两周（= A12 的门槛，来自 stats.GATES.A12）
+  var DAYS = ST.GATES.A12;              // 每日录入图与 A12 共用同一门槛来源
   var EV_SINCE_DAYS = 60;              // 验收与原有诊断沿用最近 60 天窗口
   var EVENT_PAGE_SIZE = 50;
   var M = window.Elangit.monitoring;
 
   /* ---------- 小工具 ---------- */
 
-  function dayKey(d) {
-    // 本地日期（不是 UTC）：用户看的是自己的日历，「今天」必须和他的一致，
-    // 否则晚上 8 点之后录的会被算到明天。
-    var x = new Date(d);
-    return x.getFullYear() + '-'
-      + ('0' + (x.getMonth() + 1)).slice(-2) + '-'
-      + ('0' + x.getDate()).slice(-2);
-  }
   function lastDays(n) {
-    var out = [], t = new Date();
+    // 报表日期统一使用 monitoring.js 的 Asia/Shanghai 口径。
+    var out = [], parts = M.dayKey(Date.now()).split('-');
+    var t = Date.UTC(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
     for (var i = n - 1; i >= 0; i--) {
-      var d = new Date(t.getFullYear(), t.getMonth(), t.getDate() - i);
-      out.push(dayKey(d));
+      var d = new Date(t - i * 864e5);
+      out.push(d.getUTCFullYear() + '-'
+        + ('0' + (d.getUTCMonth() + 1)).slice(-2) + '-'
+        + ('0' + d.getUTCDate()).slice(-2));
     }
     return out;
   }
@@ -254,7 +250,7 @@
     var days = lastDays(DAYS), count = {};
     days.forEach(function (d) { count[d] = 0; });
     state.items.forEach(function (it) {
-      var k = dayKey(it.created_at);
+      var k = M.dayKey(it.created_at);
       if (count[k] !== undefined) count[k]++;
     });
     return { days: days, vals: days.map(function (d) { return count[d]; }) };
@@ -823,7 +819,7 @@
 
   function exportEvents() {
     var csv = M.toCsv(
-      ['事件 ID', '发生时间（UTC，ISO 8601）', '事件名', '页面', '事件结构版本', '设备', '渠道', '安全属性摘要'],
+      ['事件 ID', '日期（Asia/Shanghai）', '发生时间（UTC，ISO 8601）', '事件名', '页面', '事件结构版本', '设备', '渠道', '安全属性摘要'],
       M.eventCsvRows(state.filteredEvents)
     );
     downloadCsv('elangit-events-' + M.dayKey(Date.now()) + '.csv', csv);

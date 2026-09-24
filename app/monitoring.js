@@ -80,6 +80,7 @@
       var time = event.at ? new Date(event.at) : null;
       return [
         event.id,
+        dayKey(event.at),
         time && isFinite(time.getTime()) ? time.toISOString() : '',
         event.name || '',
         dimension(event, 'page'),
